@@ -31,17 +31,25 @@ import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Exception.Base (Exception)
 import Control.Lens (traverseOf, _1)
 
+-- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
     deriving Show
 
+-- | TrainM is a 'StateT' monad, where the state is all the 'Parameters' and a 'Context'
 type TrainM a m = ST.StateT (M.HashMap String (Parameter a), Context) m
 
+-- | Initializer is about how to create a NDArray from a given shape. 
+-- 
+-- Usually, it can be a wrapper of MXNet operators, such as @random_uniform@, @random_normal@, 
+-- @random_gamma@, etc..
 type Initializer a = [Int] -> IO (NDArray a)
 type Optimizer a = NDArray a -> NDArray a -> IO (NDArray a)
     
+-- | Execute the 'TrainM' monad
 train :: (DType a, Monad m) => M.HashMap String (Parameter a) -> Context -> TrainM a m r -> m r
 train param context = flip ST.evalStateT (param, context)
-    
+
+-- | infer the shapes of all the symbols in a symbolic neural network
 inferShape :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int])
 inferShape sym known = do
     let (names, vals) = unzip $ M.toList known
@@ -52,12 +60,14 @@ inferShape sym known = do
     inps <- listInputs sym
     return $ M.fromList $ zip inps inp_shp
 
--- for every symbol in the neural network, it can be placeholder or a variable.
+-- | For every symbol in the neural network, it can be placeholder or a variable.
 -- therefore, a Config is to specify the shape of the placeholder and the 
 -- method to initialize the variables.
+-- 
 -- Note that it is not right to specify a symbol as both placeholder and 
--- initializer, but we 'initialize' tolerate it and consider such a symbol
--- as variable.
+-- initializer, although it is tolerated and such a symbol is considered
+-- as a variable.
+-- 
 -- Note that any symbol not specified will be initialized with the 
 -- _cfg_default_initializer.
 data Config a = Config {
@@ -66,7 +76,7 @@ data Config a = Config {
     _cfg_default_initializer :: Initializer a
 }
 
--- initialize all parameters, whose _in is sampled by a normal distr (0,1), and _grad is zeros.
+-- | initialize all parameters
 initialize :: DType a => Symbol a -> Config a -> IO (M.HashMap String (Parameter a))
 initialize sym config = do
     let spec1 = M.difference (_cfg_placeholders config) (_cfg_initializers config)
@@ -86,7 +96,7 @@ initialize sym config = do
                 arg_gr <- zeros shp
                 return $ Parameter arg_in arg_gr
 
--- bind the symbolic network with actual parameters
+-- | bind the symbolic network with actual parameters
 bind :: DType a => Symbol a -> M.HashMap String (Parameter a) -> Context -> Bool -> IO (Executor a)
 bind net args Context{..} train_ = do
     names <- listInputs net
@@ -102,7 +112,7 @@ bind net args Context{..} train_ = do
 
     makeExecutor exec_handle
 
--- single step train. Must provide all the placeholders.
+-- | single step train. Must provide all the placeholders.
 fit :: (DType a, MonadIO m, MonadThrow m) => Optimizer a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
 fit opt net datAndLbl = do
     shps <- liftIO $ inferShape net datAndLbl
@@ -126,8 +136,9 @@ fit opt net datAndLbl = do
                     return $ v {_param_in = new_in}
             else return v
 
--- forward only. Must provide all the placeholders, setting the data to 'Just ...', and set label to 'Nothing'.
--- note that the batch size here can be different from that in the training phase.
+-- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
+-- 
+-- Note that the batch size here can be different from that in the training phase.
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly net dat = do
     shps <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
@@ -149,11 +160,12 @@ forwardOnly net dat = do
         checked $ mxExecutorForward (E.getHandle exec) 0
         getOutputs exec
 
+-- | Possible exception in 'TrainM'
 data Exc = MismatchedShape String
     deriving (Show, Typeable)
 instance Exception Exc
 
--- modify the state within the inner monad
+-- | modify the state within the inner monad
 -- 
 -- thanks to lens, we can modify the first field of the state with following 
 -- combinator:
