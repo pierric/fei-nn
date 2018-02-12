@@ -4,7 +4,7 @@ synopsis:                   Train a neural network with MXNet in Haskell.
 description:                Train a neural network with MXNet in Haskell.
 homepage:                   http://github.com/pierric/mxnet-haskell-nn
 license:                    BSD3
--- license-file:               LICENSE
+license-file:               LICENSE
 author:                     Jiasen Wu
 maintainer:                 jiasenwu@hotmail.com
 copyright:                  Copyright: (c) 2018 Jiasen Wu

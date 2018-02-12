@@ -52,16 +52,16 @@ main = do
                 _cfg_default_initializer = default_initializer
               }
     result <- runResourceT $ train params contextCPU $ do 
-      liftIO $ putStrLn $ "[Train] "
-      forM_ (range 5) $ \ind -> do
-          liftIO $ putStrLn $ "iteration " ++ show ind
-          SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
-      liftIO $ putStrLn $ "[Test] "
-      SR.toList_ $ flip SR.mapM testingData $ \(x, y) -> do 
-          [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
-          ind1 <- liftIO $ argmax y  >>= items
-          ind2 <- liftIO $ argmax y' >>= items
-          return (ind1, ind2)
+        liftIO $ putStrLn $ "[Train] "
+        forM_ (range 5) $ \ind -> do
+            liftIO $ putStrLn $ "iteration " ++ show ind
+            SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
+        liftIO $ putStrLn $ "[Test] "
+        SR.toList_ $ flip SR.mapM testingData $ \(x, y) -> do 
+            [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
+            ind1 <- liftIO $ argmax y  >>= items
+            ind2 <- liftIO $ argmax y' >>= items
+            return (ind1, ind2)
     let (ls,ps) = unzip result
         ls_unbatched = mconcat ls
         ps_unbatched = mconcat ps
