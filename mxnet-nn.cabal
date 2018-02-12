@@ -1,5 +1,5 @@
 name:                       mxnet-nn
-version:                    0.0.1
+version:                    0.0.1.1
 synopsis:                   Train a neural network with MXNet in Haskell.
 description:                High level APIs to rain a neural network with MXNet in Haskell.
 homepage:                   http://github.com/pierric/mxnet-nn
