@@ -1,0 +1,4 @@
+.vscode
+.stack-work
+/examples/data/*
+!examples/data/*.sh

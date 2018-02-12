@@ -1,0 +1,22 @@
+resolver: lts-9.14
+packages:
+- .
+extra-deps:
+- git: https://github.com/pierric/mxnet-haskell.git
+  commit: f0940358e88beeaa21e91ffbb1412ea830b1cbc5
+  subdirs:
+  - mxnet
+- c2hs-extra-0.1.0.1
+# - streaming-utils-0.1.4.7
+# - aeson-1.1.2.0
+# - attoparsec-0.13.1.0
+# - streaming-0.1.4.5
+# - streaming-bytestring-0.1.4.6
+# - streaming-commons-0.1.17
+# - mmorph-1.0.9
+- tuple-ops-0.0.0.1
+extra-include-dirs:
+- /home/jwu/incubator-mxnet/include
+- /home/jwu/incubator-mxnet/nnvm/include/
+extra-lib-dirs:
+- /home/jwu/incubator-mxnet/lib
