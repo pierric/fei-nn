@@ -1,5 +1,5 @@
 name:                       mxnet-nn
-version:                    0.0.1.1
+version:                    0.0.1.2
 synopsis:                   Train a neural network with MXNet in Haskell.
 description:                High level APIs to rain a neural network with MXNet in Haskell.
 homepage:                   http://github.com/pierric/mxnet-nn
@@ -28,6 +28,29 @@ Library
 
 Executable mnist
     main-is:                mnist.hs
+    other-modules:          Parse Dataset
+    hs-source-dirs:         examples/mnist
+    ghc-options:            -Wall
+    default-language:       Haskell2010
+    build-depends:          base >= 4.7 && < 5.0
+                          , mxnet >= 0.2.0.0
+                          , unordered-containers >= 0.2.8
+                          , attoparsec >= 0.13
+                          , attoparsec-binary >= 0.2
+                          , vector >= 0.12
+                          , bytestring >= 0.10
+                          , resourcet >= 1.1.8
+                          , exceptions >= 0.8.3
+                          , mmorph >= 1.0.9
+                          , mtl >= 2.2.0
+                          , streaming >= 0.1.4.5
+                          , streaming-utils >= 0.1.4.5
+                          , streaming-bytestring >= 0.1.4.5
+                          , ghc-prim
+                          , mxnet-nn
+
+Executable lenet
+    main-is:                lenet.hs
     other-modules:          Parse Dataset
     hs-source-dirs:         examples/mnist
     ghc-options:            -Wall
