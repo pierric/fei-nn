@@ -49,15 +49,19 @@ main = do
     params <- initialize net $ Config { 
                 _cfg_placeholders = M.singleton "x" [32,28,28],
                 _cfg_initializers = M.empty,
-                _cfg_default_initializer = default_initializer
+                _cfg_default_initializer = default_initializer,
+                _cfg_context = contextCPU
               }
-    result <- runResourceT $ train params contextCPU $ do 
+    result <- runResourceT $ train params $ do 
         liftIO $ putStrLn $ "[Train] "
+        trdat <- getContext >>= return . trainingData
+        ttdat <- getContext >>= return . testingData
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
+            SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trdat
         liftIO $ putStrLn $ "[Test] "
-        SR.toList_ $ void $ flip SR.mapM testingData $ \(x, y) -> do 
+
+        SR.toList_ $ void $ flip SR.mapM ttdat $ \(x, y) -> do 
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items
             ind2 <- liftIO $ argmax y' >>= items

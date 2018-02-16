@@ -12,7 +12,8 @@ module MXNet.NN (
     inferShape,
     initialize,
     fit,
-    forwardOnly
+    forwardOnly,
+    getContext
 ) where
 
 import MXNet.Core.Base hiding (bind, context)
@@ -35,8 +36,10 @@ import Control.Lens (traverseOf, _1)
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
     deriving Show
 
--- | TrainM is a 'StateT' monad, where the state is all the 'Parameters' and a 'Context'
-type TrainM a m = ST.StateT (M.HashMap String (Parameter a), Context) m
+-- | TrainState is all the 'Parameters' and a 'Context'
+type TrainState a = (M.HashMap String (Parameter a), Context)
+-- | TrainM is a 'StateT' monad
+type TrainM a m = ST.StateT (TrainState a) m
 
 -- | Initializer is about how to create a NDArray from a given shape. 
 -- 
@@ -46,8 +49,8 @@ type Initializer a = [Int] -> IO (NDArray a)
 type Optimizer a = NDArray a -> NDArray a -> IO (NDArray a)
     
 -- | Execute the 'TrainM' monad
-train :: (DType a, Monad m) => M.HashMap String (Parameter a) -> Context -> TrainM a m r -> m r
-train param context = flip ST.evalStateT (param, context)
+train :: (DType a, Monad m) => TrainState a -> TrainM a m r -> m r
+train = flip ST.evalStateT
 
 -- | infer the shapes of all the symbols in a symbolic neural network
 inferShape :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int])
@@ -73,18 +76,21 @@ inferShape sym known = do
 data Config a = Config {
     _cfg_placeholders :: M.HashMap String [Int],
     _cfg_initializers :: M.HashMap String (Initializer a),
-    _cfg_default_initializer :: Initializer a
+    _cfg_default_initializer :: Initializer a,
+    _cfg_context :: Context
 }
 
 -- | initialize all parameters
-initialize :: DType a => Symbol a -> Config a -> IO (M.HashMap String (Parameter a))
+initialize :: DType a => Symbol a -> Config a -> IO (TrainState a)
 initialize sym config = do
     let spec1 = M.difference (_cfg_placeholders config) (_cfg_initializers config)
         spec2 = _cfg_initializers config
         dinit = _cfg_default_initializer config
-    placeholder  <- mapM zeros spec1
+        cxt   = _cfg_context config
+    placeholder  <- mapM (\shp -> makeEmptyNDArray shp cxt False) spec1
     inp_with_shp <- inferShape sym placeholder
-    M.traverseWithKey (init_with_random_normal placeholder spec2 dinit) inp_with_shp
+    args <- M.traverseWithKey (init_with_random_normal placeholder spec2 dinit) inp_with_shp
+    return $ (args, cxt)
   where
     init_with_random_normal placeholder spec2 dinit inp shp = do
         case M.lookup inp placeholder of
@@ -95,25 +101,26 @@ initialize sym config = do
                 arg_in <- case M.lookup inp spec2 of
                     Just cinit -> cinit shp
                     Nothing    -> dinit shp
-                arg_gr <- zeros shp
+                arg_gr <- makeEmptyNDArray shp (_cfg_context config) False
                 return $ Parameter arg_in arg_gr
 
 -- | bind the symbolic network with actual parameters
-bind :: DType a => Symbol a -> M.HashMap String (Parameter a) -> Context -> Bool -> IO (Executor a)
-bind net args Context{..} train_ = do
-    names <- listInputs net
-    nullarg <- MXI.nullNDArrayHandle
-    exec_handle <- checked $ mxExecutorBind (S.getHandle net) deviceType deviceId
-        (fromIntegral (M.size args))
-        -- the parameters to bind should be arranged in the same order as the names
-        (map (A.getHandle . _param_in) $ map (args M.!) names)
-        (if train_
-            then map (A.getHandle . _param_grad) $ map (args M.!) names
-            else replicate (M.size args) nullarg)
-        (replicate (M.size args) 1)
-        0 []
-
-    makeExecutor exec_handle
+bind :: (DType a, MonadIO m) => Symbol a -> Bool -> TrainM a m (Executor a)
+bind net train_ = do
+    (args, Context{..}) <- ST.get
+    liftIO $ do
+        names <- listInputs net
+        nullarg <- MXI.nullNDArrayHandle
+        exec_handle <- checked $ mxExecutorBind (S.getHandle net) deviceType deviceId
+            (fromIntegral (M.size args))
+            -- the parameters to bind should be arranged in the same order as the names
+            (map (A.getHandle . _param_in) $ map (args M.!) names)
+            (if train_
+                then map (A.getHandle . _param_grad) $ map (args M.!) names
+                else replicate (M.size args) nullarg)
+            (replicate (M.size args) 1)
+            0 []
+        makeExecutor exec_handle
 
 -- | single step train. Must provide all the placeholders.
 fit :: (DType a, MonadIO m, MonadThrow m) => Optimizer a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
@@ -128,9 +135,8 @@ fit opt net datAndLbl = do
                 (_, pshp2) <- liftIO $ ndshape (_param_grad p)
                 when (ishp /= pshp1 || ishp /= pshp2) (throwM $ MismatchedShape k)
                 return p
-    (params, context) <- ST.get
+    exec <- bind net True
     liftIO $ do
-        exec <- bind net params context True
         checked $ mxExecutorForward (E.getHandle exec) 1
         backward exec
     modifyT . traverseOf _1  $ M.traverseWithKey $ \ k v -> do
@@ -144,6 +150,7 @@ fit opt net datAndLbl = do
 -- Note that the batch size here can be different from that in the training phase.
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly net dat = do
+    cxt <- getContext
     shps <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
     modifyT . traverseOf _1 $ M.traverseWithKey $ \k p -> do
         let ishp = shps M.! k
@@ -151,17 +158,19 @@ forwardOnly net dat = do
             Just (Just a) ->
                 return $ p {_param_in = a}
             Just Nothing  -> do
-                dummy <- liftIO $ zeros ishp
+                dummy <- liftIO $ makeEmptyNDArray ishp cxt False
                 return $ p {_param_in = dummy}
             Nothing -> do
                 (_, pshp) <- liftIO $ ndshape (_param_in p)
                 when (ishp /= pshp) (throwM $ MismatchedShape k)
                 return p
-    (params, context) <- ST.get
+    exec <- bind net False
     liftIO $ do
-        exec <- bind net params context False
         checked $ mxExecutorForward (E.getHandle exec) 0
         getOutputs exec
+
+getContext :: Monad m => TrainM a m Context
+getContext = ST.gets snd
 
 -- | Possible exception in 'TrainM'
 data Exc = MismatchedShape String

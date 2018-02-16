@@ -20,24 +20,21 @@ import Parse
 type SymbolF = Symbol Float
 type ArrayF  = NDArray Float
 
-device :: Context
-device = contextCPU
-
 type StreamProc a b m = Stream (Of a) m Int -> Stream (Of b) m Int
 
 mappedOf :: Monad m => (a -> m b) -> StreamProc a b m
 -- mappedOf f = S.sequence . maps (first f)
 mappedOf = S.mapM
 
-cImageToNDArray :: MonadIO m => StreamProc (Batched Image) ArrayF m
-cImageToNDArray = mappedOf $ \dat -> liftIO $ do
+cImageToNDArray :: MonadIO m => Context -> StreamProc (Batched Image) ArrayF m
+cImageToNDArray device = mappedOf $ \dat -> liftIO $ do
   let sz = size dat
   makeNDArray [sz, 28, 28] device $ SV.concat $ NV.toList $ _batch dat
 
-cLabelToOnehotNDArray :: MonadIO m => StreamProc (Batched Label) ArrayF m
-cLabelToOnehotNDArray = mappedOf $ \dat -> liftIO $ do
+cLabelToOnehotNDArray :: MonadIO m => Context -> StreamProc (Batched Label) ArrayF m
+cLabelToOnehotNDArray device = mappedOf $ \dat -> liftIO $ do
   let sz = size dat
-  a <- array [sz] (NV.convert $ NV.map fromIntegral $ _batch dat) :: IO ArrayF
+  a <- makeNDArray [sz] device (NV.convert $ NV.map fromIntegral $ _batch dat) :: IO ArrayF
   b <- MXI.one_hot (A.getHandle a) 10 (add @"on_value" 1.0 $ add @"off_value" 0.0 nil)
   reshape (A.NDArray b) [sz, 10]
 
@@ -47,15 +44,15 @@ cBatchN n s = div' n <$> (mapped toBatch $ chunksOf n s)
     toBatch seg = first (Batched . NV.fromList) <$> S.toList seg
     div' n t = let (r, m) = divMod t n in if m > 0 then r+1 else r  
 
-trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
-trainingData = S.zip
-    (sourceImages "examples/data/train-images-idx3-ubyte" & cBatchN 32 & cImageToNDArray      )
-    (sourceLabels "examples/data/train-labels-idx1-ubyte" & cBatchN 32 & cLabelToOnehotNDArray)
+trainingData :: MonadResource m => Context -> Stream (Of (ArrayF, ArrayF)) m Int
+trainingData ctx = S.zip
+    (sourceImages "examples/data/train-images-idx3-ubyte" & cBatchN 32 & cImageToNDArray ctx      )
+    (sourceLabels "examples/data/train-labels-idx1-ubyte" & cBatchN 32 & cLabelToOnehotNDArray ctx)
 
-testingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
-testingData = S.zip
-    (sourceImages "examples/data/t10k-images-idx3-ubyte" & cBatchN 1 & cImageToNDArray      )
-    (sourceLabels "examples/data/t10k-labels-idx1-ubyte" & cBatchN 1 & cLabelToOnehotNDArray)
+testingData :: MonadResource m => Context -> Stream (Of (ArrayF, ArrayF)) m Int
+testingData ctx = S.zip
+    (sourceImages "examples/data/t10k-images-idx3-ubyte" & cBatchN 1 & cImageToNDArray ctx      )
+    (sourceLabels "examples/data/t10k-labels-idx1-ubyte" & cBatchN 1 & cLabelToOnehotNDArray ctx)
 
 newtype Batched a = Batched { _batch :: NV.Vector a }
 
