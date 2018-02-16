@@ -38,18 +38,18 @@ image w h = do
 label :: AP.Parser Label
 label = fromIntegral <$> AP.anyWord8
 
-sourceImages :: MonadResource m => FilePath -> Stream (Of Image) m ()
+sourceImages :: MonadResource m => FilePath -> Stream (Of Image) m Int
 sourceImages fp = do
   (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
   case result of
-    Left (HeaderImg _ w h) -> void $ APS.parsed (image w h) rest
+    Left (HeaderImg n w h) -> APS.parsed (image w h) rest >> return n
     _ -> throwM NotImageFile
 
-sourceLabels :: MonadResource m => FilePath -> Stream (Of Label) m ()
+sourceLabels :: MonadResource m => FilePath -> Stream (Of Label) m Int
 sourceLabels fp = do
   (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
   case result of
-    Left (HeaderLbl _) -> void $ APS.parsed label rest
+    Left (HeaderLbl n) -> APS.parsed label rest >> return n
     _ -> throwM NotImageFile
 
 data Exc = NotImageFile | NotLabelFile

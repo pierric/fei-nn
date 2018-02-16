@@ -6,7 +6,7 @@ import MXNet.Core.Base
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
 import qualified Data.HashMap.Strict as M
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import qualified Streaming.Prelude as SR
 import qualified Data.Vector.Storable as SV
 import Data.List (intersperse)
@@ -57,7 +57,7 @@ main = do
             liftIO $ putStrLn $ "iteration " ++ show ind
             SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
         liftIO $ putStrLn $ "[Test] "
-        SR.toList_ $ flip SR.mapM testingData $ \(x, y) -> do 
+        SR.toList_ $ void $ flip SR.mapM testingData $ \(x, y) -> do 
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items
             ind2 <- liftIO $ argmax y' >>= items

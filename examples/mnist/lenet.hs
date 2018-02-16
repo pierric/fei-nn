@@ -12,12 +12,13 @@ import qualified MXNet.Core.Base.Symbol as S
 import qualified MXNet.Core.Base.Internal.TH.Symbol as S
 import qualified MXNet.Core.Base.Internal as I
 import qualified Data.HashMap.Strict as M
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import qualified Streaming.Prelude as SR
 import qualified Data.Vector.Storable as SV
 import Data.List (intersperse)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
+import System.IO (hFlush, stdout)
 import MXNet.NN
 import Dataset
 
@@ -73,7 +74,9 @@ neural = do
     a2 <- S.activation "conv2-a" v2 "tanh"
     p2 <- S.pooling "conv2-p" a2 "(2,2)" "max" nil
 
-    v3 <- fullyConnected "fc1" p2 500 nil
+    fl <- S.flatten "flatten" p2
+
+    v3 <- fullyConnected "fc1" fl 500 nil
     a3 <- S.activation "fc1-a" v3 "tanh"
 
     v4 <- fullyConnected "fc2" a3 10 nil
@@ -105,13 +108,22 @@ main = do
               }
     result <- runResourceT $ train params contextCPU $ do 
         liftIO $ putStrLn $ "[Train] "
+        let index = SR.enumFrom (1 :: Int)
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            SR.mapM_ (\(x, y) -> do
+            total <- SR.effects trainingData
+            flip SR.mapM_ (SR.zip index trainingData) $ \(i, (x, y)) -> do
+                liftIO $ do
+                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
+                    hFlush stdout
                 x <- liftIO $ reshape x [32,1,28,28]
-                fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
+                fit optimizer net $ M.fromList [("x", x), ("y", y)]
         liftIO $ putStrLn $ "[Test] "
-        SR.toList_ $ flip SR.mapM testingData $ \(x, y) -> do 
+        total <- SR.effects testingData
+        SR.toList_ $ void $ flip SR.mapM (SR.zip index testingData) $ \(i, (x, y)) -> do 
+            liftIO $ do 
+                putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
+                hFlush stdout
             x <- liftIO $ reshape x [1,1,28,28]
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items

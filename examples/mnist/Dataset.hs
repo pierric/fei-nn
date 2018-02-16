@@ -23,7 +23,7 @@ type ArrayF  = NDArray Float
 device :: Context
 device = contextCPU
 
-type StreamProc a b m = Stream (Of a) m () -> Stream (Of b) m ()
+type StreamProc a b m = Stream (Of a) m Int -> Stream (Of b) m Int
 
 mappedOf :: Monad m => (a -> m b) -> StreamProc a b m
 -- mappedOf f = S.sequence . maps (first f)
@@ -42,16 +42,17 @@ cLabelToOnehotNDArray = mappedOf $ \dat -> liftIO $ do
   reshape (A.NDArray b) [sz, 10]
 
 cBatchN :: MonadIO m => Int -> StreamProc a (Batched a) m
-cBatchN n = mapped toBatch . chunksOf n
+cBatchN n s = div' n <$> (mapped toBatch $ chunksOf n s)
   where
     toBatch seg = first (Batched . NV.fromList) <$> S.toList seg
+    div' n t = let (r, m) = divMod t n in if m > 0 then r+1 else r  
 
-trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m ()
+trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
 trainingData = S.zip
     (sourceImages "examples/data/train-images-idx3-ubyte" & cBatchN 32 & cImageToNDArray      )
     (sourceLabels "examples/data/train-labels-idx1-ubyte" & cBatchN 32 & cLabelToOnehotNDArray)
 
-testingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m ()
+testingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
 testingData = S.zip
     (sourceImages "examples/data/t10k-images-idx3-ubyte" & cBatchN 1 & cImageToNDArray      )
     (sourceLabels "examples/data/t10k-labels-idx1-ubyte" & cBatchN 1 & cLabelToOnehotNDArray)

@@ -23,7 +23,7 @@ import qualified MXNet.Core.Base.Executor as E
 import qualified MXNet.Core.Types.Internal as MXI
 import qualified Data.HashMap.Strict as M
 import Data.Typeable
-import qualified Control.Monad.State as ST
+import qualified Control.Monad.State.Strict as ST
 import Data.Maybe (isJust, fromJust)
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
