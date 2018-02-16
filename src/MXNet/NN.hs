@@ -88,7 +88,9 @@ initialize sym config = do
   where
     init_with_random_normal placeholder spec2 dinit inp shp = do
         case M.lookup inp placeholder of
-            Just in_arg -> return $ Parameter in_arg (A.NDArray MXI.nullNDArrayHandle)
+            Just in_arg -> do
+                nullarg <- MXI.nullNDArrayHandle
+                return $ Parameter in_arg (A.NDArray nullarg)
             Nothing -> do
                 arg_in <- case M.lookup inp spec2 of
                     Just cinit -> cinit shp
@@ -100,13 +102,14 @@ initialize sym config = do
 bind :: DType a => Symbol a -> M.HashMap String (Parameter a) -> Context -> Bool -> IO (Executor a)
 bind net args Context{..} train_ = do
     names <- listInputs net
+    nullarg <- MXI.nullNDArrayHandle
     exec_handle <- checked $ mxExecutorBind (S.getHandle net) deviceType deviceId
         (fromIntegral (M.size args))
         -- the parameters to bind should be arranged in the same order as the names
         (map (A.getHandle . _param_in) $ map (args M.!) names)
         (if train_
             then map (A.getHandle . _param_grad) $ map (args M.!) names
-            else replicate (M.size args) MXI.nullNDArrayHandle)
+            else replicate (M.size args) nullarg)
         (replicate (M.size args) 1)
         0 []
 

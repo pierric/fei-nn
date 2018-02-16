@@ -1,10 +1,16 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Main where
 
-import MXNet.Core.Base
+import MXNet.Core.Base hiding (variable, convolution, fullyConnected)
+import MXNet.Core.Types.Internal
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
+import qualified MXNet.Core.Base.Symbol as S
+import qualified MXNet.Core.Base.Internal.TH.Symbol as S
+import qualified MXNet.Core.Base.Internal as I
 import qualified Data.HashMap.Strict as M
 import Control.Monad (forM_)
 import qualified Streaming.Prelude as SR
@@ -15,35 +21,76 @@ import Control.Monad.Trans.Resource
 import MXNet.NN
 import Dataset
 
+-- # first conv
+-- conv1 = mx.symbol.Convolution(data=data, kernel=(5,5), num_filter=20)
+-- tanh1 = mx.symbol.Activation(data=conv1, act_type="tanh")
+-- pool1 = mx.symbol.Pooling(data=tanh1, pool_type="max",
+--                           kernel=(2,2), stride=(2,2))
+-- # second conv
+-- conv2 = mx.symbol.Convolution(data=pool1, kernel=(5,5), num_filter=50)
+-- tanh2 = mx.symbol.Activation(data=conv2, act_type="tanh")
+-- pool2 = mx.symbol.Pooling(data=tanh2, pool_type="max",
+--                           kernel=(2,2), stride=(2,2))
+-- # first fullc
+-- flatten = mx.symbol.Flatten(data=pool2)
+-- fc1 = mx.symbol.FullyConnected(data=flatten, num_hidden=500)
+-- tanh3 = mx.symbol.Activation(data=fc1, act_type="tanh")
+-- # second fullc
+-- fc2 = mx.symbol.FullyConnected(data=tanh3, num_hidden=num_classes)
+-- # loss
+-- lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
+
+variable :: String -> IO SymbolHandle
+variable = I.checked . I.mxSymbolCreateVariable
+
+convolution :: (MatchKVList kvs '["stride" ':= String, "dilate" ':= String, "pad" ':= String,
+                                  "num_group" ':= Int, "workspace" ':= Int, "no_bias" ':= Bool,
+                                  "cudnn_tune" ':= String, "cudnn_off" ':= Bool, "layout" ':= String],
+                ShowKV kvs)
+            => String -> SymbolHandle -> [Int] -> Int -> HMap kvs -> IO SymbolHandle
+convolution name dat kernel_shape num_filter args = do
+    w <- variable (name ++ "-w")
+    b <- variable (name ++ "-b")
+    S.convolution name dat w b (formatShape kernel_shape) num_filter args
+
+fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool, "flatten" ':= Bool], ShowKV kvs) 
+               => String -> SymbolHandle -> Int -> HMap kvs -> IO SymbolHandle
+fullyConnected name dat num_neuron args = do
+    w <- variable (name ++ "-w")
+    b <- variable (name ++ "-b")
+    S.fullyconnected name dat w b num_neuron args
+
 neural :: IO SymbolF
 neural = do
-    x  <- variable "x"  :: IO SymbolF 
-    y  <- variable "y"  :: IO SymbolF
-    w1 <- variable "w1" :: IO SymbolF
-    b1 <- variable "b1" :: IO SymbolF
-    v1 <- convolution x w1 b1 "(5,5)" 20
-    a1 <- activation v1 "tanh"
-    a2 <- pooling a1 "(2,2)" "max"
-    w2 <- variable "w2" :: IO SymbolF
-    b2 <- variable "b2" :: IO SymbolF
-    v2 <- fullyConnected a2 w2 b2 128
-    a3 <- activation v2 "relu"
-    w3 <- variable "w3" :: IO SymbolF
-    b3 <- variable "b3" :: IO SymbolF
-    v3 <- fullyConnected a3 w3 b3 10
-    a4 <- softmaxOutput v3 y 
-    return a4
+    x  <- variable "x"
+    y  <- variable "y"
+
+    v1 <- convolution "conv1" x [5,5] 30 nil
+    a1 <- S.activation "conv1-a" v1 "relu"
+    p1 <- S.pooling "conv1-p" a1 "(2,2)" "max" nil
+
+    v2 <- convolution "conv2" p1 [5,5] 50 nil
+    a2 <- S.activation "conv2-a" v2 "tanh"
+    p2 <- S.pooling "conv2-p" a2 "(2,2)" "max" nil
+
+    v3 <- fullyConnected "fc1" p2 500 nil
+    a3 <- S.activation "fc1-a" v3 "tanh"
+
+    v4 <- fullyConnected "fc2" a3 10 nil
+    a4 <- S.softmaxoutput "softmax" v4 y nil
+    return $ S.Symbol a4
+
+formatShape :: [Int] -> String
+formatShape shape = concat $ ["("] ++ intersperse "," (map show shape) ++ [")"]
 
 range :: Int -> [Int]
 range = enumFromTo 1
 
-default_initializer :: DType a => [Int] -> IO (NDArray a)
-default_initializer shape = A.NDArray <$> A.random_normal (add @"loc" 0 $ add @"scale" 1 $ add @"shape" formatedShape nil)
-  where
-    formatedShape = concat $ ["("] ++ intersperse "," (map show shape) ++ [")"]
+default_initializer :: DType a => [Int] -> IO (A.NDArray a)
+default_initializer shape = A.NDArray <$> A.random_normal (add @"loc" 0 $ add @"scale" 1 $ add @"shape" (formatShape shape) nil)
     
-optimizer :: DType a => NDArray a -> NDArray a -> IO (NDArray a)
-optimizer v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.01 nil)
+optimizer :: DType a => A.NDArray a -> A.NDArray a -> IO (A.NDArray a)
+optimizer v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.1 nil)
 
 main :: IO ()
 main = do
@@ -65,6 +112,7 @@ main = do
                 fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
         liftIO $ putStrLn $ "[Test] "
         SR.toList_ $ flip SR.mapM testingData $ \(x, y) -> do 
+            x <- liftIO $ reshape x [1,1,28,28]
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items
             ind2 <- liftIO $ argmax y' >>= items
