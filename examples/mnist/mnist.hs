@@ -41,15 +41,15 @@ main :: IO ()
 main = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized
     -- i.e. MXNet operators are registered in the NNVM
-    _  <- mxListAllOpNames
-    net <- neural
-    params <- initialize net $ Config { 
+    _    <- mxListAllOpNames
+    net  <- neural
+    sess <- initialize net $ Config { 
                 _cfg_placeholders = M.singleton "x" [32,28,28],
                 _cfg_initializers = M.empty,
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
-              }
-    result <- runResourceT $ train params $ do 
+            }
+    result <- runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
         trdat <- getContext >>= return . trainingData
         ttdat <- getContext >>= return . testingData

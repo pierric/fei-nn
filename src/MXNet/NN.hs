@@ -36,10 +36,10 @@ import Control.Lens (traverseOf, _1)
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
     deriving Show
 
--- | TrainState is all the 'Parameters' and a 'Context'
-type TrainState a = (M.HashMap String (Parameter a), Context)
+-- | Session is all the 'Parameters' and a 'Context'
+type Session a = (M.HashMap String (Parameter a), Context)
 -- | TrainM is a 'StateT' monad
-type TrainM a m = ST.StateT (TrainState a) m
+type TrainM a m = ST.StateT (Session a) m
 
 -- | Initializer is about how to create a NDArray from a given shape. 
 -- 
@@ -49,7 +49,7 @@ type Initializer a = Context -> [Int] -> IO (NDArray a)
 type Optimizer a = Context -> NDArray a -> NDArray a -> IO (NDArray a)
     
 -- | Execute the 'TrainM' monad
-train :: (DType a, Monad m) => TrainState a -> TrainM a m r -> m r
+train :: (DType a, Monad m) => Session a -> TrainM a m r -> m r
 train = flip ST.evalStateT
 
 -- | infer the shapes of all the symbols in a symbolic neural network
@@ -81,7 +81,7 @@ data Config a = Config {
 }
 
 -- | initialize all parameters
-initialize :: DType a => Symbol a -> Config a -> IO (TrainState a)
+initialize :: DType a => Symbol a -> Config a -> IO (Session a)
 initialize sym config = do
     let spec1 = M.difference (_cfg_placeholders config) (_cfg_initializers config)
         spec2 = _cfg_initializers config
