@@ -29,7 +29,7 @@ mappedOf = S.mapM
 cImageToNDArray :: MonadIO m => Context -> StreamProc (Batched Image) ArrayF m
 cImageToNDArray device = mappedOf $ \dat -> liftIO $ do
   let sz = size dat
-  makeNDArray [sz, 28, 28] device $ SV.concat $ NV.toList $ _batch dat
+  makeNDArray [sz, 1, 28, 28] device $ SV.concat $ NV.toList $ _batch dat
 
 cLabelToOnehotNDArray :: MonadIO m => Context -> StreamProc (Batched Label) ArrayF m
 cLabelToOnehotNDArray device = mappedOf $ \dat -> liftIO $ do
