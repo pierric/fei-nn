@@ -32,8 +32,11 @@ range :: Int -> [Int]
 range = enumFromTo 1
 
 default_initializer :: DType a => Initializer a
-default_initializer _ shape = A.NDArray <$> A.random_normal (add @"loc" 0 $ add @"scale" 1 $ add @"shape" (formatShape shape) nil)
-    
+default_initializer cxt shape = A.NDArray <$> A.random_normal 
+                                        (add @"loc" 0 $ 
+                                         add @"scale" 1 $ 
+                                         add @"shape" (formatShape shape) $ 
+                                         add @"ctx" (formatContext cxt) nil)    
 optimizer :: DType a => Optimizer a
 optimizer _ v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.01 nil)
 
@@ -47,7 +50,7 @@ main = do
                 _cfg_placeholders = M.singleton "x" [32,28,28],
                 _cfg_initializers = M.empty,
                 _cfg_default_initializer = default_initializer,
-                _cfg_context = contextCPU
+                _cfg_context = contextGPU
             }
     result <- runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
@@ -56,8 +59,8 @@ main = do
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trdat
-        liftIO $ putStrLn $ "[Test] "
 
+        liftIO $ putStrLn $ "[Test] "
         SR.toList_ $ void $ flip SR.mapM ttdat $ \(x, y) -> do 
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items
