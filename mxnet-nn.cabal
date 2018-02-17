@@ -14,6 +14,8 @@ cabal-version:              >= 1.24
 
 Library
     exposed-modules:        MXNet.NN
+                            MXNet.NN.Utils
+                            MXNet.NN.Layer
     other-modules:
     hs-source-dirs:         src
     ghc-options:            -Wall
