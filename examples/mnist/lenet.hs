@@ -88,7 +88,7 @@ main = do
                 _cfg_context = contextGPU
             }
 
-    result <- runResourceT $ train sess $ do 
+    runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
         trdat <- getContext >>= return . trainingData
         ttdat <- getContext >>= return . testingData
@@ -102,9 +102,10 @@ main = do
                     hFlush stdout
                 fit optimizer net $ M.fromList [("x", x), ("y", y)]
             liftIO $ putStr "\r\ESC[K"
-        liftIO $ putStrLn $ "[Test] "
+        
+            liftIO $ putStrLn $ "[Test] "
         total <- SR.effects ttdat
-        SR.toList_ $ void $ flip SR.mapM (SR.zip index ttdat) $ \(i, (x, y)) -> do 
+        result<- SR.toList_ $ void $ flip SR.mapM (SR.zip index ttdat) $ \(i, (x, y)) -> do 
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                 hFlush stdout
@@ -112,12 +113,14 @@ main = do
             ind1 <- liftIO $ argmax y  >>= items
             ind2 <- liftIO $ argmax y' >>= items
             return (ind1, ind2)
-    let (ls,ps) = unzip result
-        ls_unbatched = mconcat ls
-        ps_unbatched = mconcat ps
-        total   = SV.length ls_unbatched
-        correct = SV.length $ SV.filter id $ SV.zipWith (==) ls_unbatched ps_unbatched
-    putStrLn $ "Accuracy: " ++ show correct ++ "/" ++ show total
+        liftIO $ putStr "\r\ESC[K"
+
+        let (ls,ps) = unzip result
+            ls_unbatched = mconcat ls
+            ps_unbatched = mconcat ps
+            total   = SV.length ls_unbatched
+            correct = SV.length $ SV.filter id $ SV.zipWith (==) ls_unbatched ps_unbatched
+        liftIO $ putStrLn $ "Accuracy: " ++ show correct ++ "/" ++ show total
   
   where
     argmax :: ArrayF -> IO ArrayF
