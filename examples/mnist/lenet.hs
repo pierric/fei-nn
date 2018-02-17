@@ -5,21 +5,20 @@
 module Main where
 
 import MXNet.Core.Base hiding (variable, convolution, fullyConnected)
-import MXNet.Core.Types.Internal
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
 import qualified MXNet.Core.Base.Symbol as S
 import qualified MXNet.Core.Base.Internal.TH.Symbol as S
-import qualified MXNet.Core.Base.Internal as I
 import qualified Data.HashMap.Strict as M
 import Control.Monad (forM_, void)
 import qualified Streaming.Prelude as SR
 import qualified Data.Vector.Storable as SV
-import Data.List (intersperse)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 import System.IO (hFlush, stdout)
 import MXNet.NN
+import MXNet.NN.Utils
+import MXNet.NN.Layer
 import Dataset
 
 -- # first conv
@@ -40,26 +39,6 @@ import Dataset
 -- fc2 = mx.symbol.FullyConnected(data=tanh3, num_hidden=num_classes)
 -- # loss
 -- lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
-
-variable :: String -> IO SymbolHandle
-variable = I.checked . I.mxSymbolCreateVariable
-
-convolution :: (MatchKVList kvs '["stride" ':= String, "dilate" ':= String, "pad" ':= String,
-                                  "num_group" ':= Int, "workspace" ':= Int, "no_bias" ':= Bool,
-                                  "cudnn_tune" ':= String, "cudnn_off" ':= Bool, "layout" ':= String],
-                ShowKV kvs)
-            => String -> SymbolHandle -> [Int] -> Int -> HMap kvs -> IO SymbolHandle
-convolution name dat kernel_shape num_filter args = do
-    w <- variable (name ++ "-w")
-    b <- variable (name ++ "-b")
-    S.convolution name dat w b (formatShape kernel_shape) num_filter args
-
-fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool, "flatten" ':= Bool], ShowKV kvs) 
-               => String -> SymbolHandle -> Int -> HMap kvs -> IO SymbolHandle
-fullyConnected name dat num_neuron args = do
-    w <- variable (name ++ "-w")
-    b <- variable (name ++ "-b")
-    S.fullyconnected name dat w b num_neuron args
 
 neural :: IO SymbolF
 neural = do
@@ -83,20 +62,18 @@ neural = do
     a4 <- S.softmaxoutput "softmax" v4 y nil
     return $ S.Symbol a4
 
-formatShape :: [Int] -> String
-formatShape shape = concat $ ["("] ++ intersperse "," (map show shape) ++ [")"]
-
 range :: Int -> [Int]
 range = enumFromTo 1
 
-default_initializer :: DType a => [Int] -> IO (A.NDArray a)
-default_initializer shape = A.NDArray <$> A.random_normal (add @"loc" 0 $ 
-                                                           add @"scale" 1 $ 
-                                                           add @"shape" (formatShape shape) $ 
-                                                           add @"ctx" "gpu(0)" nil)
+default_initializer :: DType a => Initializer a
+default_initializer cxt shape = A.NDArray <$> A.random_normal 
+                                        (add @"loc" 0 $ 
+                                         add @"scale" 1 $ 
+                                         add @"shape" (formatShape shape) $ 
+                                         add @"ctx" (formatContext cxt) nil)
     
-optimizer :: DType a => A.NDArray a -> A.NDArray a -> IO (A.NDArray a)
-optimizer v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.1 nil)
+optimizer :: DType a => Optimizer a
+optimizer _ v g = A.NDArray <$> A.sgd_update (A.getHandle v) (A.getHandle g) 0.01 nil
 
 main :: IO ()
 main = do
@@ -105,7 +82,7 @@ main = do
     _  <- mxListAllOpNames
     net <- neural
     params <- initialize net $ Config { 
-                _cfg_placeholders = M.singleton "x" [32,1,28,28],
+                _cfg_placeholders = M.singleton "x" [1,1,28,28],
                 _cfg_initializers = M.empty,
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextGPU
@@ -116,10 +93,10 @@ main = do
         trdat <- getContext >>= return . trainingData
         ttdat <- getContext >>= return . testingData
         let index = SR.enumFrom (1 :: Int)
-        forM_ (range 5) $ \ind -> do
+        forM_ (range 10) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             total <- SR.effects trdat
-            flip SR.mapM_ (SR.zip index trdat) $ \(i, (x, y)) -> do
+            _ <- flip SR.mapM_ (SR.zip index trdat) $ \(i, (x, y)) -> do
                 liftIO $ do
                     putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                     hFlush stdout

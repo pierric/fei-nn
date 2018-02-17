@@ -9,10 +9,10 @@ import qualified Data.HashMap.Strict as M
 import Control.Monad (forM_, void)
 import qualified Streaming.Prelude as SR
 import qualified Data.Vector.Storable as SV
-import Data.List (intersperse)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 import MXNet.NN
+import MXNet.NN.Utils
 import Dataset
 
 neural :: IO SymbolF
@@ -32,13 +32,11 @@ neural = do
 range :: Int -> [Int]
 range = enumFromTo 1
 
-default_initializer :: DType a => [Int] -> IO (NDArray a)
-default_initializer shape = A.NDArray <$> A.random_normal (add @"loc" 0 $ add @"scale" 1 $ add @"shape" formatedShape nil)
-  where
-    formatedShape = concat $ ["("] ++ intersperse "," (map show shape) ++ [")"]
+default_initializer :: DType a => Initializer a
+default_initializer _ shape = A.NDArray <$> A.random_normal (add @"loc" 0 $ add @"scale" 1 $ add @"shape" (formatShape shape) nil)
     
-optimizer :: DType a => NDArray a -> NDArray a -> IO (NDArray a)
-optimizer v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.01 nil)
+optimizer :: DType a => Optimizer a
+optimizer _ v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.01 nil)
 
 main :: IO ()
 main = do

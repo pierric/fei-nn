@@ -45,8 +45,8 @@ type TrainM a m = ST.StateT (TrainState a) m
 -- 
 -- Usually, it can be a wrapper of MXNet operators, such as @random_uniform@, @random_normal@, 
 -- @random_gamma@, etc..
-type Initializer a = [Int] -> IO (NDArray a)
-type Optimizer a = NDArray a -> NDArray a -> IO (NDArray a)
+type Initializer a = Context -> [Int] -> IO (NDArray a)
+type Optimizer a = Context -> NDArray a -> NDArray a -> IO (NDArray a)
     
 -- | Execute the 'TrainM' monad
 train :: (DType a, Monad m) => TrainState a -> TrainM a m r -> m r
@@ -99,8 +99,8 @@ initialize sym config = do
                 return $ Parameter in_arg (A.NDArray nullarg)
             Nothing -> do
                 arg_in <- case M.lookup inp spec2 of
-                    Just cinit -> cinit shp
-                    Nothing    -> dinit shp
+                    Just cinit -> cinit (_cfg_context config) shp
+                    Nothing    -> dinit (_cfg_context config) shp
                 arg_gr <- makeEmptyNDArray shp (_cfg_context config) False
                 return $ Parameter arg_in arg_gr
 
@@ -136,12 +136,13 @@ fit opt net datAndLbl = do
                 when (ishp /= pshp1 || ishp /= pshp2) (throwM $ MismatchedShape k)
                 return p
     exec <- bind net True
+    cxt  <- getContext
     liftIO $ do
         checked $ mxExecutorForward (E.getHandle exec) 1
         backward exec
     modifyT . traverseOf _1  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k datAndLbl)
-            then do new_in <- liftIO $ opt (_param_in v) (_param_grad v) 
+            then do new_in <- liftIO $ opt cxt (_param_in v) (_param_grad v) 
                     return $ v {_param_in = new_in}
             else return v
 
