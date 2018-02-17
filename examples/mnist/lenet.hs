@@ -100,7 +100,6 @@ main = do
                 liftIO $ do
                     putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                     hFlush stdout
-                x <- liftIO $ reshape x [32,1,28,28]
                 fit optimizer net $ M.fromList [("x", x), ("y", y)]
             liftIO $ putStr "\r\ESC[K"
         liftIO $ putStrLn $ "[Test] "
@@ -109,7 +108,6 @@ main = do
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                 hFlush stdout
-            x <- liftIO $ reshape x [1,1,28,28]
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items
             ind2 <- liftIO $ argmax y' >>= items
