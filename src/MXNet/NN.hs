@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts #-}
 module MXNet.NN (
     Parameter(..),
     Config(..),
@@ -16,21 +17,22 @@ module MXNet.NN (
     getContext
 ) where
 
-import MXNet.Core.Base hiding (bind, context)
+import MXNet.Core.Base hiding (bind, context, (^.))
 import MXNet.Core.Base.Internal
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Symbol as S
 import qualified MXNet.Core.Base.Executor as E
 import qualified MXNet.Core.Types.Internal as MXI
+import qualified MXNet.Core.Base.Internal.TH.NDArray as MXI
 import qualified Data.HashMap.Strict as M
 import Data.Typeable
 import qualified Control.Monad.State.Strict as ST
-import Data.Maybe (isJust, fromJust)
+import Data.Maybe (isJust, fromJust, maybe)
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Exception.Base (Exception)
-import Control.Lens (traverseOf, _1)
+import Control.Lens (traverseOf, _1, _2, use)
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
@@ -108,19 +110,21 @@ initialize sym config = do
 bind :: (DType a, MonadIO m) => Symbol a -> Bool -> TrainM a m (Executor a)
 bind net train_ = do
     (args, Context{..}) <- ST.get
-    liftIO $ do
+    exec_handle <- liftIO $ do
         names <- listInputs net
         nullarg <- MXI.nullNDArrayHandle
-        exec_handle <- checked $ mxExecutorBind (S.getHandle net) deviceType deviceId
-            (fromIntegral (M.size args))
-            -- the parameters to bind should be arranged in the same order as the names
-            (map (A.getHandle . _param_in) $ map (args M.!) names)
-            (if train_
-                then map (A.getHandle . _param_grad) $ map (args M.!) names
-                else replicate (M.size args) nullarg)
-            (replicate (M.size args) 1)
-            0 []
-        makeExecutor exec_handle
+        -- the parameters to bind should be arranged in the same order as the names
+        let arg_num = fromIntegral (M.size args)
+            arg_in  = map (A.getHandle . _param_in) $ map (args M.!) names
+            arg_gr  = if train_ 
+                        then map (A.getHandle . _param_grad) $ map (args M.!) names
+                        else replicate (M.size args) nullarg
+            arg_gr_req = replicate (M.size args) 1
+
+        checked $ mxExecutorBind (S.getHandle net) deviceType deviceId
+                                            arg_num arg_in arg_gr arg_gr_req 
+                                            0 []
+    return $ E.Executor exec_handle
 
 -- | single step train. Must provide all the placeholders.
 fit :: (DType a, MonadIO m, MonadThrow m) => Optimizer a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
@@ -129,38 +133,34 @@ fit opt net datAndLbl = do
     modifyT . traverseOf _1 $ M.traverseWithKey $ \k p -> do
         let ishp = shps M.! k
         case M.lookup k datAndLbl of
-            Just a  -> return $ p {_param_in = a}
+            Just a  -> liftIO $ update_param (Left a) p
             Nothing -> do
                 (_, pshp1) <- liftIO $ ndshape (_param_in p)
                 (_, pshp2) <- liftIO $ ndshape (_param_grad p)
                 when (ishp /= pshp1 || ishp /= pshp2) (throwM $ MismatchedShape k)
                 return p
     exec <- bind net True
-    cxt  <- getContext
-    liftIO $ do
+    liftIO $ do 
         checked $ mxExecutorForward (E.getHandle exec) 1
         backward exec
+    cxt <- use _2
     modifyT . traverseOf _1  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k datAndLbl)
             then do new_in <- liftIO $ opt cxt (_param_in v) (_param_grad v) 
                     return $ v {_param_in = new_in}
             else return v
+    -- liftIO $ performGC
 
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
 -- 
 -- Note that the batch size here can be different from that in the training phase.
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly net dat = do
-    cxt <- getContext
     shps <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
     modifyT . traverseOf _1 $ M.traverseWithKey $ \k p -> do
         let ishp = shps M.! k
         case M.lookup k dat of
-            Just (Just a) ->
-                return $ p {_param_in = a}
-            Just Nothing  -> do
-                dummy <- liftIO $ makeEmptyNDArray ishp cxt False
-                return $ p {_param_in = dummy}
+            Just a -> liftIO $ update_param (maybe (Right ishp) Left a) p 
             Nothing -> do
                 (_, pshp) <- liftIO $ ndshape (_param_in p)
                 when (ishp /= pshp) (throwM $ MismatchedShape k)
@@ -170,8 +170,32 @@ forwardOnly net dat = do
         checked $ mxExecutorForward (E.getHandle exec) 0
         getOutputs exec
 
+update_param :: DType a => Either (NDArray a) [Int] -> Parameter a -> IO (Parameter a)
+update_param (Left a) p = do
+    src_cxt <- A.context a
+    src_shp <- snd <$> A.ndshape a
+    dst_cxt <- A.context (_param_in p)
+    dst_shp <- snd <$> A.ndshape (_param_in p)
+    case (src_cxt == dst_cxt, src_shp == dst_shp) of
+        (True , True) -> return $ p {_param_in = a}
+        (False, True) -> do
+            MXI._copyto' (A.getHandle a) [A.getHandle (_param_in p)] :: IO ()
+            return p
+        _ -> do
+            a_copy <- makeEmptyNDArray src_shp dst_cxt False
+            MXI._copyto' (A.getHandle a) [A.getHandle a_copy] :: IO ()
+            return $ p {_param_in = a_copy}    
+update_param (Right src_shp) p = do
+    dst_cxt <- A.context (_param_in p)
+    dst_shp <- snd <$> A.ndshape (_param_in p)
+    if src_shp == dst_shp 
+        then return p
+        else do
+            dummy <- makeEmptyNDArray src_shp dst_cxt False
+            return $ p {_param_in = dummy}
+
 getContext :: Monad m => TrainM a m Context
-getContext = ST.gets snd
+getContext = use _2
 
 -- | Possible exception in 'TrainM'
 data Exc = MismatchedShape String

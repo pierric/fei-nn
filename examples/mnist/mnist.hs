@@ -54,14 +54,12 @@ main = do
             }
     result <- runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
-        trdat <- getContext >>= return . trainingData
-        ttdat <- getContext >>= return . testingData
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trdat
+            SR.mapM_ (\(x, y) -> fit optimizer net $ M.fromList [("x", x), ("y", y)]) trainingData
 
         liftIO $ putStrLn $ "[Test] "
-        SR.toList_ $ void $ flip SR.mapM ttdat $ \(x, y) -> do 
+        SR.toList_ $ void $ flip SR.mapM testingData $ \(x, y) -> do 
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ argmax y  >>= items
             ind2 <- liftIO $ argmax y' >>= items

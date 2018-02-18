@@ -73,7 +73,7 @@ default_initializer cxt shape = A.NDArray <$> A.random_normal
                                          add @"ctx" (formatContext cxt) nil)
     
 optimizer :: DType a => Optimizer a
-optimizer _ v g = A.NDArray <$> A.sgd_update (A.getHandle v) (A.getHandle g) 0.0001 nil
+optimizer _ v g = A.NDArray <$> A.sgd_update (A.getHandle v) (A.getHandle g) 0.0002 nil
 
 main :: IO ()
 main = do
@@ -90,13 +90,11 @@ main = do
 
     runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
-        trdat <- getContext >>= return . trainingData
-        ttdat <- getContext >>= return . testingData
         let index = SR.enumFrom (1 :: Int)
-        forM_ (range 20) $ \ind -> do
+        forM_ (range 50) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            total <- SR.effects trdat
-            _ <- flip SR.mapM_ (SR.zip index trdat) $ \(i, (x, y)) -> do
+            total <- SR.effects trainingData
+            _ <- flip SR.mapM_ (SR.zip index trainingData) $ \(i, (x, y)) -> do
                 liftIO $ do
                     putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                     hFlush stdout
@@ -104,8 +102,8 @@ main = do
             liftIO $ putStr "\r\ESC[K"
         
         liftIO $ putStrLn $ "[Test] "
-        total <- SR.effects ttdat
-        result<- SR.toList_ $ void $ flip SR.mapM (SR.zip index ttdat) $ \(i, (x, y)) -> do 
+        total <- SR.effects testingData
+        result<- SR.toList_ $ void $ flip SR.mapM (SR.zip index testingData) $ \(i, (x, y)) -> do 
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                 hFlush stdout
