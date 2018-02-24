@@ -2,9 +2,12 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TemplateHaskell #-}
 module MXNet.NN (
     Parameter(..),
     Config(..),
+    Session(..),
     Exc(..),
     Initializer,
     Optimizer,
@@ -32,14 +35,16 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Exception.Base (Exception)
-import Control.Lens (traverseOf, _1, _2, use)
+import Control.Lens (makeLenses, traverseOf, use)
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
     deriving Show
 
 -- | Session is all the 'Parameters' and a 'Context'
-type Session a = (M.HashMap String (Parameter a), Context)
+-- type Session a = (M.HashMap String (Parameter a), Context)
+data Session a = Session { _sess_param :: !(M.HashMap String (Parameter a)), _sess_context :: !Context }
+makeLenses ''Session
 -- | TrainM is a 'StateT' monad
 type TrainM a m = ST.StateT (Session a) m
 
@@ -92,7 +97,7 @@ initialize sym config = do
     placeholder  <- mapM (\shp -> makeEmptyNDArray shp cxt False) spec1
     inp_with_shp <- inferShape sym placeholder
     args <- M.traverseWithKey (init_with_random_normal placeholder spec2 dinit) inp_with_shp
-    return $ (args, cxt)
+    return $ Session args cxt
   where
     init_with_random_normal placeholder spec2 dinit inp shp = do
         case M.lookup inp placeholder of
@@ -109,7 +114,8 @@ initialize sym config = do
 -- | bind the symbolic network with actual parameters
 bind :: (DType a, MonadIO m) => Symbol a -> Bool -> TrainM a m (Executor a)
 bind net train_ = do
-    (args, Context{..}) <- ST.get
+    args <- use sess_param
+    Context{..} <- use sess_context
     exec_handle <- liftIO $ do
         names <- listInputs net
         nullarg <- MXI.nullNDArrayHandle
@@ -130,7 +136,7 @@ bind net train_ = do
 fit :: (DType a, MonadIO m, MonadThrow m) => Optimizer a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
 fit opt net datAndLbl = do
     shps <- liftIO $ inferShape net datAndLbl
-    modifyT . traverseOf _1 $ M.traverseWithKey $ \k p -> do
+    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
         let ishp = shps M.! k
         case M.lookup k datAndLbl of
             Just a  -> liftIO $ update_param (Left a) p
@@ -143,13 +149,12 @@ fit opt net datAndLbl = do
     liftIO $ do 
         checked $ mxExecutorForward (E.getHandle exec) 1
         backward exec
-    cxt <- use _2
-    modifyT . traverseOf _1  $ M.traverseWithKey $ \ k v -> do
+    cxt <- use sess_context
+    modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k datAndLbl)
             then do new_in <- liftIO $ opt cxt (_param_in v) (_param_grad v) 
                     return $ v {_param_in = new_in}
             else return v
-    -- liftIO $ performGC
 
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
 -- 
@@ -157,7 +162,7 @@ fit opt net datAndLbl = do
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly net dat = do
     shps <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
-    modifyT . traverseOf _1 $ M.traverseWithKey $ \k p -> do
+    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
         let ishp = shps M.! k
         case M.lookup k dat of
             Just a -> liftIO $ update_param (maybe (Right ishp) Left a) p 
@@ -195,7 +200,7 @@ update_param (Right src_shp) p = do
             return $ p {_param_in = dummy}
 
 getContext :: Monad m => TrainM a m Context
-getContext = use _2
+getContext = use sess_context
 
 -- | Possible exception in 'TrainM'
 data Exc = MismatchedShape String

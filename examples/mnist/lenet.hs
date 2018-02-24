@@ -24,13 +24,11 @@ import Dataset
 -- # first conv
 -- conv1 = mx.symbol.Convolution(data=data, kernel=(5,5), num_filter=20)
 -- tanh1 = mx.symbol.Activation(data=conv1, act_type="tanh")
--- pool1 = mx.symbol.Pooling(data=tanh1, pool_type="max",
---                           kernel=(2,2), stride=(2,2))
+-- pool1 = mx.symbol.Pooling(data=tanh1, pool_type="max", kernel=(2,2), stride=(2,2))
 -- # second conv
 -- conv2 = mx.symbol.Convolution(data=pool1, kernel=(5,5), num_filter=50)
 -- tanh2 = mx.symbol.Activation(data=conv2, act_type="tanh")
--- pool2 = mx.symbol.Pooling(data=tanh2, pool_type="max",
---                           kernel=(2,2), stride=(2,2))
+-- pool2 = mx.symbol.Pooling(data=tanh2, pool_type="max", kernel=(2,2), stride=(2,2))
 -- # first fullc
 -- flatten = mx.symbol.Flatten(data=pool2)
 -- fc1 = mx.symbol.FullyConnected(data=flatten, num_hidden=500)
@@ -116,9 +114,9 @@ main = do
         let (ls,ps) = unzip result
             ls_unbatched = mconcat ls
             ps_unbatched = mconcat ps
-            total   = SV.length ls_unbatched
+            total_test_items = SV.length ls_unbatched
             correct = SV.length $ SV.filter id $ SV.zipWith (==) ls_unbatched ps_unbatched
-        liftIO $ putStrLn $ "Accuracy: " ++ show correct ++ "/" ++ show total
+        liftIO $ putStrLn $ "Accuracy: " ++ show correct ++ "/" ++ show total_test_items
   
   where
     argmax :: ArrayF -> IO ArrayF
