@@ -31,6 +31,11 @@ cImageToNDArray = mappedOf $ \dat -> liftIO $ do
   let sz = size dat
   makeNDArray [sz, 1, 28, 28] contextCPU $ SV.concat $ NV.toList $ _batch dat
 
+cLabelToNDArray :: MonadIO m => StreamProc (Batched Label) ArrayF m
+cLabelToNDArray = mappedOf $ \dat -> liftIO $ do
+  let sz = size dat
+  makeNDArray [sz] contextCPU (NV.convert $ NV.map fromIntegral $ _batch dat) :: IO ArrayF
+
 cLabelToOnehotNDArray :: MonadIO m => StreamProc (Batched Label) ArrayF m
 cLabelToOnehotNDArray = mappedOf $ \dat -> liftIO $ do
   let sz = size dat
@@ -47,12 +52,12 @@ cBatchN n s = div' n <$> (mapped toBatch $ chunksOf n s)
 trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
 trainingData = S.zip
     (sourceImages "examples/data/train-images-idx3-ubyte" & cBatchN 32 & cImageToNDArray      )
-    (sourceLabels "examples/data/train-labels-idx1-ubyte" & cBatchN 32 & cLabelToOnehotNDArray)
+    (sourceLabels "examples/data/train-labels-idx1-ubyte" & cBatchN 32 & cLabelToNDArray)
 
 testingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
 testingData = S.zip
     (sourceImages "examples/data/t10k-images-idx3-ubyte" & cBatchN 1 & cImageToNDArray      )
-    (sourceLabels "examples/data/t10k-labels-idx1-ubyte" & cBatchN 1 & cLabelToOnehotNDArray)
+    (sourceLabels "examples/data/t10k-labels-idx1-ubyte" & cBatchN 1 & cLabelToNDArray)
 
 newtype Batched a = Batched { _batch :: NV.Vector a }
 
