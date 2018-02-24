@@ -148,7 +148,14 @@ fit opt net datAndLbl = do
     exec <- bind net True
     liftIO $ do 
         checked $ mxExecutorForward (E.getHandle exec) 1
-        backward exec
+        checked $ mxExecutorBackward (E.getHandle exec) 0 []
+        -- forward/backward are asynchronised operation in mxnet, in a
+        -- sense that only opcodes are pushed onto an internal execution 
+        -- stack, and there is a executor running in a separate thread.
+        -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
+        -- called so fast that too many opcodes and data on the stack, 
+        -- as described in issue #1
+        checked $ mxNDArrayWaitAll        
     cxt <- use sess_context
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k datAndLbl)
@@ -173,6 +180,8 @@ forwardOnly net dat = do
     exec <- bind net False
     liftIO $ do
         checked $ mxExecutorForward (E.getHandle exec) 0
+        -- for the same reason in 'fit'.
+        checked $ mxNDArrayWaitAll
         getOutputs exec
 
 update_param :: DType a => Either (NDArray a) [Int] -> Parameter a -> IO (Parameter a)
