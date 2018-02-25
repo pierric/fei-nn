@@ -92,17 +92,11 @@ main = do
         forM_ (range 50) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             total <- SR.effects trainingData
-            -- why this could leads to OOM of GPU?
-            --
-            -- _ <- flip SR.mapM_ (SR.zip index trainingData) $ \(i, (x, y)) -> do
-            --
-            -- while this one is good
-            as SR.:> _ <- SR.toList trainingData
-            flip mapM_ (zip [(1::Int)..] as) $ \(i, (x, y)) -> do
-                liftIO $ do
+            _ <- flip SR.mapM_ (SR.zip index trainingData) $ \(i, (x, y)) -> do
+                 liftIO $ do
                     putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                     hFlush stdout
-                fit optimizer net $ M.fromList [("x", x), ("y", y)]
+                 fit optimizer net $ M.fromList [("x", x), ("y", y)]
             liftIO $ putStr "\r\ESC[K"
         
         liftIO $ putStrLn $ "[Test] "
@@ -112,7 +106,7 @@ main = do
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                 hFlush stdout
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
-            ind1 <- liftIO $ argmax y  >>= items
+            ind1 <- liftIO $ items y
             ind2 <- liftIO $ argmax y' >>= items
             return (ind1, ind2)
         liftIO $ putStr "\r\ESC[K"

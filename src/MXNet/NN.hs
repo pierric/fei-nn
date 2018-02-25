@@ -17,7 +17,9 @@ module MXNet.NN (
     initialize,
     fit,
     forwardOnly,
-    getContext
+    getContext,
+    sess_param,
+    sess_context,
 ) where
 
 import MXNet.Core.Base hiding (bind, context, (^.))
@@ -155,12 +157,16 @@ fit opt net datAndLbl = do
         -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
         -- called so fast that too many opcodes and data on the stack, 
         -- as described in issue #1
-        checked $ mxNDArrayWaitAll        
+        checked $ mxNDArrayWaitAll
     cxt <- use sess_context
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k datAndLbl)
             then do new_in <- liftIO $ opt cxt (_param_in v) (_param_grad v) 
-                    return $ v {_param_in = new_in}
+                    -- must evaluate the new parameter to WHNF
+                    -- otherwise, the old _param_in is retained.
+                    -- if context is GPU, then OOM will soon 
+                    -- occur, as described in issue #2
+                    return $! v {_param_in = new_in}
             else return v
 
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
@@ -198,7 +204,7 @@ update_param (Left a) p = do
         _ -> do
             a_copy <- makeEmptyNDArray src_shp dst_cxt False
             MXI._copyto' (A.getHandle a) [A.getHandle a_copy] :: IO ()
-            return $ p {_param_in = a_copy}    
+            return $! p {_param_in = a_copy}    
 update_param (Right src_shp) p = do
     dst_cxt <- A.context (_param_in p)
     dst_shp <- snd <$> A.ndshape (_param_in p)
@@ -206,7 +212,7 @@ update_param (Right src_shp) p = do
         then return p
         else do
             dummy <- makeEmptyNDArray src_shp dst_cxt False
-            return $ p {_param_in = dummy}
+            return $! p {_param_in = dummy}
 
 getContext :: Monad m => TrainM a m Context
 getContext = use sess_context
