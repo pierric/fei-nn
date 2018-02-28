@@ -12,13 +12,13 @@ The `Symbol` API of MXNet synthesize a symbolic graph of the neural network. To 
 `TrainM` is simply a `StateT` monad, where the internal state is a store of all the backing `NDArray`s together with a `Context` (CPU/GPU). Both `fit` and `forwardOnly` must be run inside this monad.
 
 ## `initialize`
-`initialize :: DType a => Symbol a -> Config a -> IO (M.HashMap String (Parameter a))` 
+`initialize :: DType a => Symbol a -> Config a -> IO (Session a)` 
 
 It takes the symbolic graph, and a configuration of 
 1) shapes of the placeholder in the training phase.
 2) how to initialize the NDArrays
 
-It returns a initial state, for starting the `TrainM` Monad.
+It returns a initial session, with it to run the training in `TrainM` Monad.
 
 ## `fit`
 `fit :: (DType a, MonadIO m, MonadThrow m) => Optimizer a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()`
