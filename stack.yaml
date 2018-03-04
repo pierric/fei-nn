@@ -1,4 +1,6 @@
-resolver: lts-9.14
+# GHC 8.0.2 has a bug, which may leads to OOM
+# https://ghc.haskell.org/trac/ghc/ticket/13615
+resolver: lts-10.7
 packages:
 - .
 extra-deps:
@@ -7,14 +9,8 @@ extra-deps:
   subdirs:
   - mxnet
 - c2hs-extra-0.1.0.1
-# - streaming-utils-0.1.4.7
-# - aeson-1.1.2.0
-# - attoparsec-0.13.1.0
-# - streaming-0.1.4.5
-# - streaming-bytestring-0.1.4.6
-# - streaming-commons-0.1.17
-# - mmorph-1.0.9
 - tuple-ops-0.0.0.1
+allow-newer: true
 extra-include-dirs:
 - /home/jwu/incubator-mxnet/include
 - /home/jwu/incubator-mxnet/nnvm/include/
