@@ -43,14 +43,14 @@ sourceImages fp = do
   (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
   case result of
     Left (HeaderImg n w h) -> APS.parsed (image w h) rest >> return n
-    _ -> throwM NotImageFile
+    _ -> effect $ throwM NotImageFile
 
 sourceLabels :: MonadResource m => FilePath -> Stream (Of Label) m Int
 sourceLabels fp = do
   (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
   case result of
     Left (HeaderLbl n) -> APS.parsed label rest >> return n
-    _ -> throwM NotImageFile
+    _ -> effect $ throwM NotImageFile
 
 data Exc = NotImageFile | NotLabelFile
     deriving (Show, Typeable)

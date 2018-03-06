@@ -10,6 +10,7 @@ extra-deps:
   - mxnet
 - c2hs-extra-0.1.0.1
 - tuple-ops-0.0.0.1
+- streaming-utils-0.1.4.7
 allow-newer: true
 extra-include-dirs:
 - /home/jwu/incubator-mxnet/include
