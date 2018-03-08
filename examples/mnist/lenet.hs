@@ -4,11 +4,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Main where
 
-import MXNet.Core.Base hiding (variable, convolution, fullyConnected)
+-- import MXNet.Core.Base hiding (variable, convolution, fullyConnected)
+import MXNet.Core.Base (DType, contextGPU, mxListAllOpNames)
+import MXNet.Core.Base.HMap
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
 import qualified MXNet.Core.Base.Symbol as S
-import qualified MXNet.Core.Base.Internal.TH.Symbol as S
 import qualified Data.HashMap.Strict as M
 import Control.Monad (forM_, void)
 import qualified Streaming.Prelude as SR
@@ -44,20 +45,20 @@ neural = do
     y  <- variable "y"
 
     v1 <- convolution "conv1" x [5,5] 20 nil
-    a1 <- S.activation "conv1-a" v1 "tanh"
-    p1 <- S.pooling "conv1-p" a1 "(2,2)" "max" nil
+    a1 <- activation "conv1-a" v1 Tanh
+    p1 <- pooling "conv1-p" a1 [2,2] PoolingMax nil
 
     v2 <- convolution "conv2" p1 [5,5] 50 nil
-    a2 <- S.activation "conv2-a" v2 "tanh"
-    p2 <- S.pooling "conv2-p" a2 "(2,2)" "max" nil
+    a2 <- activation "conv2-a" v2 Tanh
+    p2 <- pooling "conv2-p" a2 [2,2] PoolingMax nil
 
-    fl <- S.flatten "flatten" p2
+    fl <- flatten "flatten" p2
 
     v3 <- fullyConnected "fc1" fl 500 nil
-    a3 <- S.activation "fc1-a" v3 "tanh"
+    a3 <- activation "fc1-a" v3 Tanh
 
     v4 <- fullyConnected "fc2" a3 10 nil
-    a4 <- S.softmaxoutput "softmax" v4 y nil
+    a4 <- softmaxoutput "softmax" v4 y nil
     return $ S.Symbol a4
 
 range :: Int -> [Int]
@@ -106,8 +107,8 @@ main = do
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
                 hFlush stdout
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
-            ind1 <- liftIO $ items y
-            ind2 <- liftIO $ argmax y' >>= items
+            ind1 <- liftIO $ A.items y
+            ind2 <- liftIO $ argmax y' >>= A.items
             return (ind1, ind2)
         liftIO $ putStr "\r\ESC[K"
 
