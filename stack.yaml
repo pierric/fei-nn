@@ -4,8 +4,8 @@ resolver: lts-10.7
 packages:
 - .
 extra-deps:
-- git: https://github.com/pierric/mxnet-haskell.git
-  commit: afd0aa747e3a5f9229e7658e0776596b1243bd6e
+- git: https://github.com/sighingnow/mxnet-haskell.git
+  commit: 3d6cfb301f0e4f1c21c2596de27446b51d8162ae 
   subdirs:
   - mxnet
 - c2hs-extra-0.1.0.1
