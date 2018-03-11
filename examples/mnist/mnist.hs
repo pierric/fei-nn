@@ -37,9 +37,6 @@ default_initializer cxt shape = A.NDArray <$> A.random_normal
                                          add @"scale" 1 $ 
                                          add @"shape" (formatShape shape) $ 
                                          add @"ctx" (formatContext cxt) nil)    
-optimizer :: DType a => Optimizer a
-optimizer _ v g = A.NDArray <$> (A.sgd_update (A.getHandle v) (A.getHandle g) 0.01 nil)
-
 main :: IO ()
 main = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized
@@ -52,6 +49,8 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextGPU
             }
+    optimizer <- makeOptimizer 0.002 nil :: IO (SGD Float '[])
+
     result <- runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
         forM_ (range 5) $ \ind -> do

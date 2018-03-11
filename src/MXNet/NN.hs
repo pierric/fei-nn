@@ -10,7 +10,6 @@ module MXNet.NN (
     Session(..),
     Exc(..),
     Initializer,
-    Optimizer,
     TrainM,
     train,
     inferShape,
@@ -20,6 +19,7 @@ module MXNet.NN (
     getContext,
     sess_param,
     sess_context,
+    module MXNet.NN.Optimizer
 ) where
 
 import MXNet.Core.Base hiding (bind, context, (^.))
@@ -39,6 +39,8 @@ import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Exception.Base (Exception)
 import Control.Lens (makeLenses, traverseOf, use)
 
+import MXNet.NN.Optimizer
+
 -- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
     deriving Show
@@ -55,7 +57,6 @@ type TrainM a m = ST.StateT (Session a) m
 -- Usually, it can be a wrapper of MXNet operators, such as @random_uniform@, @random_normal@, 
 -- @random_gamma@, etc..
 type Initializer a = Context -> [Int] -> IO (NDArray a)
-type Optimizer a = Context -> NDArray a -> NDArray a -> IO (NDArray a)
     
 -- | Execute the 'TrainM' monad
 train :: (DType a, Monad m) => Session a -> TrainM a m r -> m r
@@ -135,7 +136,8 @@ bind net train_ = do
     return $ E.Executor exec_handle
 
 -- | single step train. Must provide all the placeholders.
-fit :: (DType a, MonadIO m, MonadThrow m) => Optimizer a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
+fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt) 
+    => opt -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
 fit opt net datAndLbl = do
     shps <- liftIO $ inferShape net datAndLbl
     modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
@@ -158,10 +160,9 @@ fit opt net datAndLbl = do
         -- called so fast that too many opcodes and data on the stack, 
         -- as described in issue #1
         checked $ mxNDArrayWaitAll
-    cxt <- use sess_context
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k datAndLbl)
-            then do new_in <- liftIO $ opt cxt (_param_in v) (_param_grad v) 
+            then do new_in <- liftIO $ optimize opt k (_param_in v) (_param_grad v) 
                     -- must evaluate the new parameter to WHNF
                     -- otherwise, the old _param_in is retained.
                     -- if context is GPU, then OOM will soon 
