@@ -44,10 +44,10 @@ cLabelToOnehotNDArray = mappedOf $ \dat -> liftIO $ do
   reshape (A.NDArray b) [sz, 10]
 
 cBatchN :: MonadIO m => Int -> StreamProc a (Batched a) m
-cBatchN n s = div' n <$> (mapped toBatch $ chunksOf n s)
+cBatchN n s = div'n <$> (mapped toBatch $ chunksOf n s)
   where
     toBatch seg = first (Batched . NV.fromList) <$> S.toList seg
-    div' n t = let (r, m) = divMod t n in if m > 0 then r+1 else r  
+    div'n t = let (r, m) = divMod t n in if m > 0 then r+1 else r  
 
 trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
 trainingData = S.zip
