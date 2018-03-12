@@ -115,10 +115,24 @@ initialize sym config = do
                 return $ Parameter arg_in arg_gr
 
 -- | bind the symbolic network with actual parameters
-bind :: (DType a, MonadIO m) => Symbol a -> Bool -> TrainM a m (Executor a)
-bind net train_ = do
-    args <- use sess_param
+bind :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> Bool -> TrainM a m (Executor a)
+bind net dat train_ = do
     Context{..} <- use sess_context
+
+    shps <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
+    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
+        let ishp = shps M.! k
+        case M.lookup k dat of
+            Just a  -> liftIO $ update_param (maybe (Right ishp) Left a) p
+            Nothing -> do
+                (_, pshp1) <- liftIO $ ndshape (_param_in p)
+                when (ishp /= pshp1 ) (throwM $ MismatchedShape k)
+                when train_ $ do
+                    (_, pshp2) <- liftIO $ ndshape (_param_grad p)
+                    when (ishp /= pshp2) (throwM $ MismatchedShape k)
+                return p
+
+    args <- use sess_param
     exec_handle <- liftIO $ do
         names <- listInputs net
         nullarg <- MXI.nullNDArrayHandle
@@ -134,22 +148,36 @@ bind net train_ = do
                                             arg_num arg_in arg_gr arg_gr_req 
                                             0 []
     return $ E.Executor exec_handle
+  where
+    update_param :: DType a => Either (NDArray a) [Int] -> Parameter a -> IO (Parameter a)
+    update_param (Left a) p = do
+        src_cxt <- A.context a
+        src_shp <- snd <$> A.ndshape a
+        dst_cxt <- A.context (_param_in p)
+        dst_shp <- snd <$> A.ndshape (_param_in p)
+        case (src_cxt == dst_cxt, src_shp == dst_shp) of
+            (True , True) -> return $ p {_param_in = a}
+            (False, True) -> do
+                MXI._copyto' (A.getHandle a) [A.getHandle (_param_in p)] :: IO ()
+                return p
+            _ -> do
+                a_copy <- makeEmptyNDArray src_shp dst_cxt False
+                MXI._copyto' (A.getHandle a) [A.getHandle a_copy] :: IO ()
+                return $! p {_param_in = a_copy}    
+    update_param (Right src_shp) p = do
+        dst_cxt <- A.context (_param_in p)
+        dst_shp <- snd <$> A.ndshape (_param_in p)
+        if src_shp == dst_shp 
+            then return p
+            else do
+                dummy <- makeEmptyNDArray src_shp dst_cxt False
+                return $! p {_param_in = dummy}
 
 -- | single step train. Must provide all the placeholders.
 fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt) 
     => opt -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
 fit opt net datAndLbl = do
-    shps <- liftIO $ inferShape net datAndLbl
-    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
-        let ishp = shps M.! k
-        case M.lookup k datAndLbl of
-            Just a  -> liftIO $ update_param (Left a) p
-            Nothing -> do
-                (_, pshp1) <- liftIO $ ndshape (_param_in p)
-                (_, pshp2) <- liftIO $ ndshape (_param_grad p)
-                when (ishp /= pshp1 || ishp /= pshp2) (throwM $ MismatchedShape k)
-                return p
-    exec <- bind net True
+    exec <- bind net (M.map Just datAndLbl) True
     liftIO $ do 
         checked $ mxExecutorForward (E.getHandle exec) 1
         checked $ mxExecutorBackward (E.getHandle exec) 0 []
@@ -160,8 +188,31 @@ fit opt net datAndLbl = do
         -- called so fast that too many opcodes and data on the stack, 
         -- as described in issue #1
         checked $ mxNDArrayWaitAll
+    updateParameters opt datAndLbl
+
+-- fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt) 
+--            => opt -> Symbol a -> M.HashMap String (NDArray a) -> EvalMetric -> TrainM a m (Int, Float)
+-- fitAndEval opt net dataAndLbl metric = do
+--     exec <- bind net (M.map Just datAndLbl) True
+--     pred <- liftIO $ do 
+--         checked $ mxExecutorForward (E.getHandle exec) 1
+--         checked $ mxExecutorBackward (E.getHandle exec) 0 []
+--         -- forward/backward are asynchronised operation in mxnet, in a
+--         -- sense that only opcodes are pushed onto an internal execution 
+--         -- stack, and there is a executor running in a separate thread.
+--         -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
+--         -- called so fast that too many opcodes and data on the stack, 
+--         -- as described in issue #1
+--         checked $ mxNDArrayWaitAll
+--         getOutputs exec
+--     updateParameters opt datAndLbl
+--     evaluate metric pred datAndLbl
+
+updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt) 
+                 => opt -> M.HashMap String any -> TrainM dtype m ()
+updateParameters opt blacklist = do
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
-        if (not $ M.member k datAndLbl)
+        if (not $ M.member k blacklist)
             then do new_in <- liftIO $ optimize opt k (_param_in v) (_param_grad v) 
                     -- must evaluate the new parameter to WHNF
                     -- otherwise, the old _param_in is retained.
@@ -175,45 +226,12 @@ fit opt net datAndLbl = do
 -- Note that the batch size here can be different from that in the training phase.
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly net dat = do
-    shps <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
-    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
-        let ishp = shps M.! k
-        case M.lookup k dat of
-            Just a -> liftIO $ update_param (maybe (Right ishp) Left a) p 
-            Nothing -> do
-                (_, pshp) <- liftIO $ ndshape (_param_in p)
-                when (ishp /= pshp) (throwM $ MismatchedShape k)
-                return p
-    exec <- bind net False
+    exec <- bind net dat False
     liftIO $ do
         checked $ mxExecutorForward (E.getHandle exec) 0
         -- for the same reason in 'fit'.
         checked $ mxNDArrayWaitAll
         getOutputs exec
-
-update_param :: DType a => Either (NDArray a) [Int] -> Parameter a -> IO (Parameter a)
-update_param (Left a) p = do
-    src_cxt <- A.context a
-    src_shp <- snd <$> A.ndshape a
-    dst_cxt <- A.context (_param_in p)
-    dst_shp <- snd <$> A.ndshape (_param_in p)
-    case (src_cxt == dst_cxt, src_shp == dst_shp) of
-        (True , True) -> return $ p {_param_in = a}
-        (False, True) -> do
-            MXI._copyto' (A.getHandle a) [A.getHandle (_param_in p)] :: IO ()
-            return p
-        _ -> do
-            a_copy <- makeEmptyNDArray src_shp dst_cxt False
-            MXI._copyto' (A.getHandle a) [A.getHandle a_copy] :: IO ()
-            return $! p {_param_in = a_copy}    
-update_param (Right src_shp) p = do
-    dst_cxt <- A.context (_param_in p)
-    dst_shp <- snd <$> A.ndshape (_param_in p)
-    if src_shp == dst_shp 
-        then return p
-        else do
-            dummy <- makeEmptyNDArray src_shp dst_cxt False
-            return $! p {_param_in = dummy}
 
 getContext :: Monad m => TrainM a m Context
 getContext = use sess_context
