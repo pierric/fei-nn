@@ -17,6 +17,7 @@ Library
                             MXNet.NN.Utils
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
+                            MXNet.NN.EvalMetric
     other-modules:
     hs-source-dirs:         src
     ghc-options:            -Wall

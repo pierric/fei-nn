@@ -5,7 +5,7 @@
 module Main where
 
 -- import MXNet.Core.Base hiding (variable, convolution, fullyConnected)
-import MXNet.Core.Base (DType, contextGPU, mxListAllOpNames)
+import MXNet.Core.Base (DType, contextCPU, contextGPU, mxListAllOpNames)
 import MXNet.Core.Base.HMap
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
@@ -20,6 +20,7 @@ import System.IO (hFlush, stdout)
 import MXNet.NN
 import MXNet.NN.Utils
 import MXNet.NN.Layer
+import MXNet.NN.EvalMetric
 import Dataset
 
 -- # first conv
@@ -81,7 +82,7 @@ main = do
                 _cfg_placeholders = M.singleton "x" [1,1,28,28],
                 _cfg_initializers = M.empty,
                 _cfg_default_initializer = default_initializer,
-                _cfg_context = contextGPU
+                _cfg_context = contextCPU
             }
     optimizer <- makeOptimizer 0.002 nil :: IO (ADAM Float '[])
 
@@ -91,12 +92,14 @@ main = do
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             total <- SR.effects trainingData
+            metric <- newMetric CrossEntropy "CrossEntropy" ["y"]
             _ <- flip SR.mapM_ (SR.zip index trainingData) $ \(i, (x, y)) -> do
                  liftIO $ do
-                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
+                    eval <- formatMetric metric
+                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total ++ " " ++ eval
                     hFlush stdout
-                 fit optimizer net $ M.fromList [("x", x), ("y", y)]
-            liftIO $ putStr "\r\ESC[K"
+                 fitAndEval optimizer net (M.fromList [("x", x), ("y", y)]) metric
+            liftIO $ putStrLn ""
         
         liftIO $ putStrLn $ "[Test] "
         total <- SR.effects testingData

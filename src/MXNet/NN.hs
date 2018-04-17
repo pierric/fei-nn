@@ -14,7 +14,7 @@ module MXNet.NN (
     train,
     inferShape,
     initialize,
-    fit,
+    fit, fitAndEval,
     forwardOnly,
     getContext,
     sess_param,
@@ -33,13 +33,14 @@ import qualified Data.HashMap.Strict as M
 import Data.Typeable
 import qualified Control.Monad.State.Strict as ST
 import Data.Maybe (isJust, fromJust, maybe)
-import Control.Monad (when)
+import Control.Monad (when, zipWithM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Exception.Base (Exception)
-import Control.Lens (makeLenses, traverseOf, use)
+import Control.Lens (makeLenses, traverseOf, use, (^.))
 
 import MXNet.NN.Optimizer
+import MXNet.NN.EvalMetric
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
@@ -190,23 +191,18 @@ fit opt net datAndLbl = do
         checked $ mxNDArrayWaitAll
     updateParameters opt datAndLbl
 
--- fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt) 
---            => opt -> Symbol a -> M.HashMap String (NDArray a) -> EvalMetric -> TrainM a m (Int, Float)
--- fitAndEval opt net dataAndLbl metric = do
---     exec <- bind net (M.map Just datAndLbl) True
---     pred <- liftIO $ do 
---         checked $ mxExecutorForward (E.getHandle exec) 1
---         checked $ mxExecutorBackward (E.getHandle exec) 0 []
---         -- forward/backward are asynchronised operation in mxnet, in a
---         -- sense that only opcodes are pushed onto an internal execution 
---         -- stack, and there is a executor running in a separate thread.
---         -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
---         -- called so fast that too many opcodes and data on the stack, 
---         -- as described in issue #1
---         checked $ mxNDArrayWaitAll
---         getOutputs exec
---     updateParameters opt datAndLbl
---     evaluate metric pred datAndLbl
+fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt, EvalMetricMethod mth)
+           => opt -> Symbol a -> M.HashMap String (NDArray a) -> Metric a mth -> TrainM a m ()
+fitAndEval opt net datAndLbl metric = do
+     exec  <- bind net (M.map Just datAndLbl) True
+     preds <- liftIO $ do 
+         checked $ mxExecutorForward (E.getHandle exec) 1
+         checked $ mxExecutorBackward (E.getHandle exec) 0 []
+         checked $ mxNDArrayWaitAll
+         getOutputs exec
+     updateParameters opt datAndLbl
+     let labels = map (datAndLbl M.!) (metric ^. metric_labelname)
+     liftIO $ zipWithM_ (evaluate metric) preds labels
 
 updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt) 
                  => opt -> M.HashMap String any -> TrainM dtype m ()
