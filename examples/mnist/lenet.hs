@@ -68,7 +68,7 @@ range = enumFromTo 1
 default_initializer :: DType a => Initializer a
 default_initializer cxt shape = A.NDArray <$> A.random_normal 
                                         (add @"loc" 0 $ 
-                                         add @"scale" 1 $ 
+                                         add @"scale" 0.1 $ 
                                          add @"shape" (formatShape shape) $ 
                                          add @"ctx" (formatContext cxt) nil)
     
