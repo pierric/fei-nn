@@ -11,8 +11,7 @@ import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
 import qualified MXNet.Core.Base.Symbol as S
 import qualified Data.HashMap.Strict as M
-import Control.Monad (forM_, void)
-import qualified Streaming.Prelude as SR
+import Control.Monad (forM_)
 import qualified Data.Vector.Storable as SV
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
@@ -21,7 +20,9 @@ import MXNet.NN
 import MXNet.NN.Utils
 import MXNet.NN.Layer
 import MXNet.NN.EvalMetric
-import Dataset
+import MXNet.NN.DataIter
+
+import DatasetStreaming
 
 -- # first conv
 -- conv1 = mx.symbol.Convolution(data=data, kernel=(5,5), num_filter=20)
@@ -88,24 +89,21 @@ main = do
 
     runResourceT $ train sess $ do 
         liftIO $ putStrLn $ "[Train] "
-        let index = SR.enumFrom (1 :: Int)
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            total <- SR.effects trainingData
             metric <- newMetric CrossEntropy "CrossEntropy" ["y"]
-            _ <- flip SR.mapM_ (SR.zip index trainingData) $ \(i, (x, y)) -> do
+            _ <- forEach trainingData $ \(i,t) x y -> do
                  liftIO $ do
                     eval <- formatMetric metric
-                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total ++ " " ++ eval
+                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
                     hFlush stdout
                  fitAndEval optimizer net (M.fromList [("x", x), ("y", y)]) metric
             liftIO $ putStrLn ""
         
         liftIO $ putStrLn $ "[Test] "
-        total <- SR.effects testingData
-        result<- SR.toList_ $ void $ flip SR.mapM (SR.zip index testingData) $ \(i, (x, y)) -> do 
+        result<- forEach testingData $ \(i,t) x y -> do 
             liftIO $ do 
-                putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show total
+                putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
                 hFlush stdout
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ A.items y

@@ -2,18 +2,22 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE OverloadedLists #-}
-module Dataset where
+module DatasetStreaming where
 
 import MXNet.Core.Base
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as MXI
+import Data.Typeable
 import Data.Function ((&))
 import Streaming
 import Streaming.Prelude (Of(..))
 import qualified Streaming.Prelude as S
-import Control.Monad.Trans.Resource (MonadResource(..))
+import Data.Attoparsec.ByteString.Streaming as APS
+import qualified Data.ByteString.Streaming as BSS
+import Control.Monad.Trans.Resource (MonadResource(..), MonadThrow(..))
 import qualified Data.Vector as NV
 import qualified Data.Vector.Storable as SV
+import Control.Exception.Base
 
 import Parse
 
@@ -43,11 +47,13 @@ cLabelToOnehotNDArray = mappedOf $ \dat -> liftIO $ do
   b <- MXI.one_hot (A.getHandle a) 10 (add @"on_value" 1.0 $ add @"off_value" 0.0 nil)
   reshape (A.NDArray b) [sz, 10]
 
-cBatchN :: MonadIO m => Int -> StreamProc a (Batched a) m
-cBatchN n s = div'n <$> (mapped toBatch $ chunksOf n s)
+cBatchN :: (MonadIO m, MonadThrow m) => Int -> StreamProc a (Batched a) m
+cBatchN n s = do 
+  total <- mapped toBatch $ chunksOf n s
+  let (r, m) = divMod total n 
+  if m > 0 then effect $ throwM BadBatchSize else return r
   where
     toBatch seg = first (Batched . NV.fromList) <$> S.toList seg
-    div'n t = let (r, m) = divMod t n in if m > 0 then r+1 else r  
 
 trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
 trainingData = S.zip
@@ -64,3 +70,20 @@ newtype Batched a = Batched { _batch :: NV.Vector a }
 size :: Batched a -> Int
 size (Batched b) = NV.length b
 
+sourceImages :: MonadResource m => FilePath -> Stream (Of Image) m Int
+sourceImages fp = do
+  (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
+  case result of
+    Left (HeaderImg n w h) -> APS.parsed (image w h) rest >> return n
+    _ -> effect $ throwM NotImageFile
+
+sourceLabels :: MonadResource m => FilePath -> Stream (Of Label) m Int
+sourceLabels fp = do
+  (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
+  case result of
+    Left (HeaderLbl n) -> APS.parsed label rest >> return n
+    _ -> effect $ throwM NotLabelFile
+
+data Exc = NotImageFile | NotLabelFile | BadBatchSize
+    deriving (Show, Typeable)
+instance Exception Exc

@@ -1,15 +1,9 @@
 module Parse where
 
-import Streaming
 import Data.Attoparsec.ByteString as AP
 import Data.Attoparsec.Binary as AP
-import Data.Attoparsec.ByteString.Streaming as APS
-import qualified Data.ByteString.Streaming as BSS
 import qualified Data.ByteString.Internal as BS
 import qualified Data.Vector.Storable as SV
-import Control.Exception.Base
-import Control.Monad.Trans.Resource (MonadResource(..), MonadThrow(..))
-import Data.Typeable
 
 type Image = SV.Vector Float
 type Label = Int
@@ -37,21 +31,3 @@ image w h = do
 
 label :: AP.Parser Label
 label = fromIntegral <$> AP.anyWord8
-
-sourceImages :: MonadResource m => FilePath -> Stream (Of Image) m Int
-sourceImages fp = do
-  (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
-  case result of
-    Left (HeaderImg n w h) -> APS.parsed (image w h) rest >> return n
-    _ -> effect $ throwM NotImageFile
-
-sourceLabels :: MonadResource m => FilePath -> Stream (Of Label) m Int
-sourceLabels fp = do
-  (result, rest)<- lift $ APS.parse header (BSS.readFile fp)
-  case result of
-    Left (HeaderLbl n) -> APS.parsed label rest >> return n
-    _ -> effect $ throwM NotImageFile
-
-data Exc = NotImageFile | NotLabelFile
-    deriving (Show, Typeable)
-instance Exception Exc
