@@ -19,6 +19,7 @@ import qualified Data.Vector as NV
 import qualified Data.Vector.Storable as SV
 import Control.Exception.Base
 
+import MXNet.NN.Types
 import Parse
 
 type SymbolF = Symbol Float
@@ -55,12 +56,12 @@ cBatchN n s = do
   where
     toBatch seg = first (Batched . NV.fromList) <$> S.toList seg
 
-trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
+trainingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) (TrainM Float m) Int
 trainingData = S.zip
     (sourceImages "examples/data/train-images-idx3-ubyte" & cBatchN 32 & cImageToNDArray      )
     (sourceLabels "examples/data/train-labels-idx1-ubyte" & cBatchN 32 & cLabelToNDArray)
 
-testingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) m Int
+testingData :: MonadResource m => Stream (Of (ArrayF, ArrayF)) (TrainM Float m) Int
 testingData = S.zip
     (sourceImages "examples/data/t10k-images-idx3-ubyte" & cBatchN 1 & cImageToNDArray      )
     (sourceLabels "examples/data/t10k-labels-idx1-ubyte" & cBatchN 1 & cLabelToNDArray)

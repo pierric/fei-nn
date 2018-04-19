@@ -11,7 +11,7 @@ import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
 import qualified MXNet.Core.Base.Symbol as S
 import qualified Data.HashMap.Strict as M
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import qualified Data.Vector.Storable as SV
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
@@ -22,7 +22,7 @@ import MXNet.NN.Layer
 import MXNet.NN.EvalMetric
 import MXNet.NN.DataIter
 
-import DatasetStreaming
+import DatasetVector
 
 -- # first conv
 -- conv1 = mx.symbol.Convolution(data=data, kernel=(5,5), num_filter=20)
@@ -88,20 +88,24 @@ main = do
     optimizer <- makeOptimizer 0.002 nil :: IO (ADAM Float '[])
 
     runResourceT $ train sess $ do 
+
+        trainingData <- loadTrainingData
+        testingData  <- loadTestingData
+
         liftIO $ putStrLn $ "[Train] "
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             metric <- newMetric CrossEntropy "CrossEntropy" ["y"]
-            _ <- forEach trainingData $ \(i,t) x y -> do
-                 liftIO $ do
-                    eval <- formatMetric metric
-                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
-                    hFlush stdout
-                 fitAndEval optimizer net (M.fromList [("x", x), ("y", y)]) metric
+            void $ forEach trainingData $ \(i,t) x y -> do
+                liftIO $ do
+                   eval <- formatMetric metric
+                   putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
+                   hFlush stdout
+                fitAndEval optimizer net (M.fromList [("x", x), ("y", y)]) metric
             liftIO $ putStrLn ""
         
         liftIO $ putStrLn $ "[Test] "
-        result<- forEach testingData $ \(i,t) x y -> do 
+        result <- forEach testingData $ \(i,t) x y -> do 
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
                 hFlush stdout
