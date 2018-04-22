@@ -55,7 +55,19 @@ instance EvalMetricMethod CrossEntropy where
         (n1, shp1) <- A.ndshape preds
         (n2, shp2) <- A.ndshape label
         when (n1 /= 2 || n2 /= 1 || head shp1 /= head shp2) (throwM InvalidInput)
-        predprj <- A.pick (A.getHandle preds) (A.getHandle label) nil
+        -- before call pick, we have to make sure preds and label 
+        -- are in the same context
+        preds_may_copy <- do
+            c1 <- context preds
+            c2 <- context label
+            if c1 == c2 
+                then return preds
+                else do
+                    (_, preds_shap) <- ndshape preds
+                    preds_copy <- A.makeEmptyNDArray preds_shap c2 False
+                    A._copyto' (A.getHandle preds) [A.getHandle preds_copy] :: IO ()
+                    return preds_copy
+        predprj <- A.pick (A.getHandle preds_may_copy) (A.getHandle label) nil
         predlog <- A.log predprj
         loss    <- A.sum predlog nil >>= A.items . A.NDArray
         modifyIORef (_metric_sum metric) (+ (negate $ loss SV.! 0))
@@ -64,3 +76,4 @@ instance EvalMetricMethod CrossEntropy where
 data EvalMetricExc = InvalidInput
     deriving (Show, Typeable)
 instance Exception EvalMetricExc
+
