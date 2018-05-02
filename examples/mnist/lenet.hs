@@ -20,7 +20,7 @@ import MXNet.NN
 import MXNet.NN.Utils
 import MXNet.NN.Layer
 import MXNet.NN.EvalMetric
-import MXNet.NN.DataIter
+import MXNet.NN.DataIter.Class
 
 import DatasetVector
 
@@ -96,7 +96,7 @@ main = do
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             metric <- newMetric CrossEntropy "CrossEntropy" ["y"]
-            void $ forEach trainingData $ \(i,t) x y -> do
+            void $ forEach' trainingData $ \(i,t) x y -> do
                 liftIO $ do
                    eval <- formatMetric metric
                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
@@ -105,7 +105,7 @@ main = do
             liftIO $ putStrLn ""
         
         liftIO $ putStrLn $ "[Test] "
-        result <- forEach testingData $ \(i,t) x y -> do 
+        result <- forEach' testingData $ \(i,t) x y -> do 
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
                 hFlush stdout

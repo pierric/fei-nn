@@ -10,7 +10,7 @@ import qualified Data.Vector.Storable as VS
 import qualified Data.ByteString as BS
 import Data.Attoparsec.ByteString as AP
 
-import MXNet.NN.LazyVec as VL
+import MXNet.NN.DataIter.LazyVec as VL
 import Parse
 
 type SymbolF = Symbol Float
