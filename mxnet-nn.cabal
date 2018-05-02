@@ -19,8 +19,8 @@ Library
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
                             MXNet.NN.EvalMetric
-                            MXNet.NN.DataIter
-                            MXNet.NN.LazyVec
+                            MXNet.NN.DataIter.Class
+                            MXNet.NN.DataIter.LazyVec
     other-modules:
     hs-source-dirs:         src
     ghc-options:            -Wall

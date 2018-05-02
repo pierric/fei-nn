@@ -1,4 +1,5 @@
-module MXNet.NN.LazyVec where
+{-# LANGUAGE FlexibleInstances #-}
+module MXNet.NN.DataIter.LazyVec where
 
 import Prelude hiding (zip)
 import Data.Vector (Vector)
@@ -6,6 +7,9 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 import Data.IORef
 import Control.Monad
+import Control.Monad.IO.Class
+import MXNet.Core.Base (NDArray)
+import MXNet.NN.DataIter.Class
 
 data Lazy a = Direct a | Make (() -> IO a)
 
@@ -69,3 +73,18 @@ map :: (a -> IO b) -> LVec a -> LVec b
 map f v = case fmap (V.mapM f) v of 
             Direct a -> Make (\_ -> a)
             Make   m -> Make (join . m)
+
+type instance DatasetConstraint (LVec (NDArray t, NDArray t)) m2 = MonadIO m2
+
+instance Dataset (LVec (NDArray t, NDArray t)) where
+    type DatType (LVec (NDArray t, NDArray t)) = t
+    size dat = liftIO $ (toVec dat >>= return . V.length)
+    forEach  dat proc = do
+        vec <- liftIO $ toVec dat
+        ret <- V.imapM (\i (x,y) -> proc (i+1) x y) vec
+        return $ V.toList ret        
+    forEach' dat proc = do
+        vec <- liftIO $ toVec dat
+        let t = V.length vec
+        ret <- V.imapM (\i (x,y) -> proc (i+1,t) x y) vec
+        return $ V.toList ret
