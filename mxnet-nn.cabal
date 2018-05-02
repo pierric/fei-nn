@@ -34,7 +34,6 @@ Library
                           , mtl >= 2.2
                           , lens >= 4.12
                           , transformers-base >= 0.4.4
-                          , streaming >= 0.1.4.5
 
 Executable lenet
     main-is:                lenet.hs
