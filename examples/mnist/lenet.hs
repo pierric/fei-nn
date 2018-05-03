@@ -4,7 +4,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Main where
 
--- import MXNet.Core.Base hiding (variable, convolution, fullyConnected)
 import MXNet.Core.Base (DType, contextCPU, contextGPU, mxListAllOpNames)
 import MXNet.Core.Base.HMap
 import qualified MXNet.Core.Base.NDArray as A
@@ -96,7 +95,7 @@ main = do
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             metric <- newMetric CrossEntropy "CrossEntropy" ["y"]
-            void $ forEach' trainingData $ \(i,t) x y -> do
+            void $ forEachD_ni trainingData $ \((t,i), (x, y)) -> do
                 liftIO $ do
                    eval <- formatMetric metric
                    putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
@@ -105,7 +104,7 @@ main = do
             liftIO $ putStrLn ""
         
         liftIO $ putStrLn $ "[Test] "
-        result <- forEach' testingData $ \(i,t) x y -> do 
+        result <- forEachD_ni testingData $ \((t,i), (x, y)) -> do 
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
                 hFlush stdout

@@ -1,3 +1,4 @@
+{-# Language MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.DataIter.LazyVec where
 
@@ -8,7 +9,8 @@ import qualified Data.Vector.Mutable as VM
 import Data.IORef
 import Control.Monad
 import Control.Monad.IO.Class
-import MXNet.Core.Base (NDArray)
+import Control.Exception.Base (assert)
+-- import MXNet.Core.Base (NDArray)
 import MXNet.NN.DataIter.Class
 
 data Lazy a = Direct a | Make (() -> IO a)
@@ -29,26 +31,27 @@ force (Make f)   = f ()
 -- toVector :: LVec a -> IO (Vector a)
 -- toVector v = join $ force $ fmap (V.mapM force) v
 
-type LVec a = Lazy (Vector a)
+data LVec a = LVec { size :: Int, unLVec :: Lazy (Vector a)}
 
 fromVec :: Vector a -> LVec a
-fromVec = Direct
+fromVec v = LVec (V.length v) (Direct v)
 
 toVec :: LVec a -> IO (Vector a)
-toVec = force 
+toVec = force . unLVec
 
 batch :: Int -> LVec a -> IO (LVec (Vector a))
 batch chunksize vec = do
     pos <- newIORef 0
-    return $ case vec of 
+    return $ case unLVec vec of 
       Direct v -> makeChunk pos v
-      Make   f -> Make $ f >=> (toVec . makeChunk pos)
+      Make   f -> LVec new_vec_size . Make $ f >=> (toVec . makeChunk pos)
   where
+    total = size vec
+    (quotient, remainder) = divMod total chunksize
+    new_vec_size = if remainder > 0 then quotient + 1 else quotient    
     makeChunk cur_pos vector =
-        let total = V.length vector
-            (quotient, remainder) = divMod total chunksize
-            new_vec_size = if remainder > 0 then quotient + 1 else quotient    
-        in Make $ \_ -> do
+        assert (V.length vector == total) $ 
+        LVec new_vec_size . Make $ \_ -> do
             vec' <- VM.new new_vec_size
             forM_ [0..new_vec_size-1] $ \ i -> do
                 j <- readIORef cur_pos
@@ -64,27 +67,30 @@ batch chunksize vec = do
             V.freeze vec'    
 
 zip :: LVec a -> LVec b -> LVec (a,b)
-zip (Direct a) (Direct b) = Direct (V.zip a b)
-zip (Direct a) (Make   f) = Make (f >=> return . V.zip a)
-zip (Make   f) (Direct b) = Make (f >=> return . flip V.zip b)
-zip (Make   f) (Make   g) = Make (\_ -> liftM2 V.zip (f ()) (g ()))
+zip (LVec n1 (Direct a)) (LVec n2 (Direct b)) = LVec (min n1 n2) (Direct (V.zip a b))
+zip (LVec n1 (Direct a)) (LVec n2 (Make   f)) = LVec (min n1 n2) (Make (f >=> return . V.zip a))
+zip (LVec n1 (Make   f)) (LVec n2 (Direct b)) = LVec (min n1 n2) (Make (f >=> return . flip V.zip b))
+zip (LVec n1 (Make   f)) (LVec n2 (Make   g)) = LVec (min n1 n2) (Make (\_ -> liftM2 V.zip (f ()) (g ())))
 
 map :: (a -> IO b) -> LVec a -> LVec b
-map f v = case fmap (V.mapM f) v of 
-            Direct a -> Make (\_ -> a)
-            Make   m -> Make (join . m)
+map f v = case fmap (V.mapM f) (unLVec v) of 
+            Direct a -> LVec (size v) $ Make (\_ -> a)
+            Make   m -> LVec (size v) $ Make (join . m)
 
-type instance DatasetConstraint (LVec (NDArray t, NDArray t)) m2 = MonadIO m2
+type instance DatasetConstraint LVec m = MonadIO m
 
-instance Dataset (LVec (NDArray t, NDArray t)) where
-    type DatType (LVec (NDArray t, NDArray t)) = t
-    size dat = liftIO $ (toVec dat >>= return . V.length)
-    forEach  dat proc = do
+instance Dataset LVec where
+    fromListD = fromVec . V.fromList
+    zipD      = zip
+    sizeD dat = return $ size dat
+    forEachD dat proc = do
         vec <- liftIO $ toVec dat
-        ret <- V.imapM (\i (x,y) -> proc (i+1) x y) vec
-        return $ V.toList ret        
-    forEach' dat proc = do
-        vec <- liftIO $ toVec dat
-        let t = V.length vec
-        ret <- V.imapM (\i (x,y) -> proc (i+1,t) x y) vec
+        ret <- V.mapM proc vec
         return $ V.toList ret
+
+    -- LVec does not support infinite stream, so we override the 
+    -- default implementations
+    forEachD_i  dat = forEachD (zipD (fromListD [1..size dat]) dat)
+    forEachD_ni dat proc = 
+        let n = size dat
+        in forEachD ((fromListD (replicate n n) `zipD` fromListD [1..n]) `zipD` dat) proc    

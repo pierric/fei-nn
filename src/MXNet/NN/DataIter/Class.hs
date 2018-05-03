@@ -1,14 +1,21 @@
+{-# Language MultiParamTypeClasses, FunctionalDependencies #-}
+{-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.DataIter.Class where
 
-import MXNet.Core.Base (NDArray)
 import GHC.Exts (Constraint)
-import MXNet.NN.Types (TrainM)
 
-type family DatasetConstraint d (m :: * -> *) :: Constraint
+type family DatasetConstraint (d :: * -> *) (m :: * -> *) :: Constraint
 
-class Dataset d where
-    type DatType d :: *
-    size :: DatasetConstraint d m => d -> TrainM (DatType d) m Int
-    forEach :: DatasetConstraint d m => d -> (Int -> NDArray (DatType d) -> NDArray (DatType d) -> TrainM (DatType d) m a) -> TrainM (DatType d) m [a]
-    forEach' :: DatasetConstraint d m => d -> ((Int,Int) -> NDArray (DatType d) -> NDArray (DatType d) -> TrainM (DatType d) m a) -> TrainM (DatType d) m [a]
+class Dataset (d :: * -> *) where
+    fromListD   :: [e] -> d e
+    zipD        :: d e1 -> d e2 -> d (e1, e2)
+    sizeD       :: (DatasetConstraint d m, Monad m) => d e -> m Int
+    forEachD    :: (DatasetConstraint d m, Monad m) => d e -> (e -> m a) -> m [a]
 
+    forEachD_i  :: (DatasetConstraint d m, Monad m) => d e -> ((Int, e) -> m a) -> m [a]
+    forEachD_i  dat = forEachD (zipD (fromListD [1..]) dat)
+
+    forEachD_ni :: (DatasetConstraint d m, Monad m) => d e -> (((Int, Int), e) -> m a) -> m [a]
+    forEachD_ni dat proc = do 
+        n <- sizeD dat
+        forEachD ((fromListD (repeat n) `zipD` fromListD [1..]) `zipD` dat) proc
