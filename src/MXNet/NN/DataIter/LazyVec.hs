@@ -10,7 +10,6 @@ import Data.IORef
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Exception.Base (assert)
--- import MXNet.Core.Base (NDArray)
 import MXNet.NN.DataIter.Class
 
 data Lazy a = Direct a | Make (() -> IO a)
@@ -22,14 +21,6 @@ instance Functor Lazy where
 force :: Lazy a -> IO a
 force (Direct a) = return a
 force (Make f)   = f ()
-
--- type LVec a = Lazy (Vector (Lazy a))
-
--- fromVector :: Vector a -> LVec a
--- fromVector = Direct . V.map Direct
-
--- toVector :: LVec a -> IO (Vector a)
--- toVector v = join $ force $ fmap (V.mapM force) v
 
 data LVec a = LVec { size :: Int, unLVec :: Lazy (Vector a)}
 
@@ -91,6 +82,3 @@ instance Dataset LVec where
     -- LVec does not support infinite stream, so we override the 
     -- default implementations
     forEachD_i  dat = forEachD (zipD (fromListD [1..size dat]) dat)
-    forEachD_ni dat proc = 
-        let n = size dat
-        in forEachD ((fromListD (replicate n n) `zipD` fromListD [1..n]) `zipD` dat) proc    

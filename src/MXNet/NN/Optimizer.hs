@@ -2,9 +2,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE ConstrainedClassMethods #-}
 
-module MXNet.NN.Optimizer where
+module MXNet.NN.Optimizer (
+    Optimizer(..),
+    OptArgsCst,
+    SGD, ADAM
+) where
 
 import qualified Data.HashMap.Strict as M
 import MXNet.Core.Base.NDArray (NDArray)
@@ -12,39 +15,39 @@ import qualified MXNet.Core.Base.NDArray as A
 import MXNet.Core.Base.HMap
 import MXNet.Core.Base.Internal.TH.NDArray as A
 import Data.IORef
-import GHC.Exts (Constraint)
 
-class Optimizer opt where
-    type OptDType   opt :: *
-    type OptArgsLst opt :: [KV *]
-    type OptArgsCst opt :: Constraint
-    makeOptimizer :: OptArgsCst opt => Float -> HMap (OptArgsLst opt) -> IO opt
-    optimize :: OptArgsCst opt => opt -> String -> NDArray dytpe -> NDArray dtype -> IO (NDArray dtype)
+-- | Constraint of using an optimizer
+type OptArgsCst opt args = (ShowKV args, MatchKVList args (OptArgsList opt))
+
+-- | Abstract Optimizer type class
+class Optimizer (opt :: * -> [KV *] -> *) where
+    -- | Specific constraints of the optimizer
+    type OptArgsList opt :: [KV *]
+    -- | make the optimizer
+    makeOptimizer :: OptArgsCst opt args => Float -> HMap args -> IO (opt dtype args)
+    -- | run the optimizer with the input & expected tensor
+    optimize :: OptArgsCst opt args => opt dtype args -> String -> NDArray dytpe -> NDArray dtype -> IO (NDArray dtype)
 
 -- | SGD optimizer
 data SGD dtype args = SGD Float (HMap args)
 
-instance Optimizer (SGD dt args) where
-    type OptDType   (SGD dt args) = dt
-    type OptArgsLst (SGD dt args) = args
-    type OptArgsCst (SGD dt args) = (ShowKV args, MatchKVList args '["wd"            ':= Float,
-                                                                  "rescale_grad"  ':= Float,
-                                                                  "clip_gradient" ':= Float])
+instance Optimizer SGD where
+    type OptArgsList SGD = '["wd"            ':= Float,
+                             "rescale_grad"  ':= Float,
+                             "clip_gradient" ':= Float]
     makeOptimizer lr args = return $ SGD lr args
     optimize (SGD lr args) _ weight gradient = A.NDArray <$> A.sgd_update (A.getHandle weight) (A.getHandle gradient) lr args
 
 -- | ADAM optmizer
 data ADAM dtype args = ADAM Float (HMap args) (IORef (M.HashMap String (NDArray dtype, NDArray dtype)))
 
-instance Optimizer (ADAM dt args) where
-    type OptDType   (ADAM dt args) = dt
-    type OptArgsLst (ADAM dt args) = args
-    type OptArgsCst (ADAM dt args) = (ShowKV args, MatchKVList args '["beta1"         ':= Float,
-                                                                   "beta2"         ':= Float,
-                                                                   "epsilon"       ':= Float,
-                                                                   "wd"            ':= Float,
-                                                                   "rescale_grad"  ':= Float,
-                                                                   "clip_gradient" ':= Float])
+instance Optimizer ADAM where
+    type OptArgsList ADAM = '["beta1"         ':= Float,
+                              "beta2"         ':= Float,
+                              "epsilon"       ':= Float,
+                              "wd"            ':= Float,
+                              "rescale_grad"  ':= Float,
+                              "clip_gradient" ':= Float]
     makeOptimizer lr args = do
         empty <- newIORef M.empty
         return $ ADAM lr args empty

@@ -158,8 +158,8 @@ bind net dat train_ = do
                 return $! p {_param_in = dummy}
 
 -- | single step train. Must provide all the placeholders.
-fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt) 
-    => opt -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
+fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt g) 
+    => opt a g -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
 fit opt net datAndLbl = do
     exec <- bind net (M.map Just datAndLbl) True
     liftIO $ do 
@@ -174,8 +174,10 @@ fit opt net datAndLbl = do
         checked $ mxNDArrayWaitAll
     updateParameters opt datAndLbl
 
-fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt, a ~ OptDType opt, EvalMetricMethod mth)
-           => opt -> Symbol a -> M.HashMap String (NDArray a) -> Metric a mth -> TrainM a m ()
+-- | single step train. Must provide all the placeholders.
+--   After fitting, it also update the evaluation metric.
+fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt g, EvalMetricMethod mth)
+           => opt a g -> Symbol a -> M.HashMap String (NDArray a) -> Metric a mth -> TrainM a m ()
 fitAndEval opt net datAndLbl metric = do
      exec  <- bind net (M.map Just datAndLbl) True
      preds <- liftIO $ do 
@@ -187,8 +189,8 @@ fitAndEval opt net datAndLbl metric = do
      let labels = map (datAndLbl M.!) (metric ^. metric_labelname)
      liftIO $ zipWithM_ (evaluate metric) preds labels
 
-updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt) 
-                 => opt -> M.HashMap String any -> TrainM dtype m ()
+updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args) 
+                 => opt dtype args -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         if (not $ M.member k blacklist)
