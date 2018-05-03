@@ -7,7 +7,8 @@ import GHC.Exts (Constraint)
 -- | Constraints on Dataset and the monad where the operation shall be ran.
 type family DatasetConstraint (d :: * -> *) (m :: * -> *) :: Constraint
 
--- | Abstract Dataset type class
+-- | Abstract Dataset type class.
+-- Available instances include 'LVec' and mxnet data-iters in package <https://github.com/pierric/mxnet-dataiter mxnet-dataiter>
 class Dataset (d :: * -> *) where
     -- | Create Dataset from `[]`.
     -- note that depending on the instance, it may or may not work with infinitive list.
