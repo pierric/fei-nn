@@ -30,3 +30,10 @@ class Dataset (d :: * -> *) where
     forEachD_ni dat proc = do 
         n <- sizeD dat
         forEachD ((fromListD (replicate n n) `zipD` fromListD [1..n]) `zipD` dat) proc
+
+type instance DatasetConstraint [] m = ()
+instance Dataset [] where
+    fromListD = id
+    zipD = zip
+    sizeD = return . length
+    forEachD = flip mapM
