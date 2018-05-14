@@ -189,7 +189,7 @@ fitAndEval opt net datAndLbl metric = do
      let labels = map (datAndLbl M.!) (metric ^. metric_labelname)
      liftIO $ zipWithM_ (evaluate metric) preds labels
 
-updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args) 
+updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args, DType dtype) 
                  => opt dtype args -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do

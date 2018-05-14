@@ -84,7 +84,7 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer 0.002 nil :: IO (ADAM Float '[])
+    optimizer <- makeOptimizer (ADAM'Args 0.002) nil
 
     runResourceT $ train sess $ do 
 
