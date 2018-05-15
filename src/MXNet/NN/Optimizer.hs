@@ -7,7 +7,7 @@ module MXNet.NN.Optimizer (
     Optimizer(..),
     ReqArgs(..),
     OptArgsCst,
-    SGD, ADAM
+    SGD_Opt, SGD_Mom_Opt, ADAM_Opt
 ) where
 
 import qualified Data.HashMap.Strict as M
@@ -33,48 +33,55 @@ class Optimizer (opt :: * -> [KV *] -> *) where
     optimize :: (OptArgsCst opt oargs, DType dtype) => opt dtype oargs -> String -> NDArray dytpe -> NDArray dtype -> IO (NDArray dtype)
 
 -- | SGD optimizer
-data SGD dtype args = SGD Float (HMap args)
+data SGD_Opt dtype args = SGD_Opt Float (HMap args)
 
-instance Optimizer SGD where
-    newtype ReqArgs SGD = SGD'Args Float
-    type OptArgsList SGD = '["wd"            ':= Float,
-                             "rescale_grad"  ':= Float,
-                             "clip_gradient" ':= Float]
-    makeOptimizer (SGD'Args lr) args = return $ SGD lr args
-    optimize (SGD lr args) _ weight gradient = A.NDArray <$> A.sgd_update (A.getHandle weight) (A.getHandle gradient) lr args
-
--- | SGD with momentum optimizer
-data SGD'Mom dtype args = SGD'Mom Float (HMap args) (NDArray dtype)
-
-instance Optimizer SGD'Mom where
-    data ReqArgs SGD'Mom = SGD'Mom'Args { _sgd_mom_args_lr :: Float
-                                        , _sgd_mom_args_shape :: [Int]
-                                        , _sgd_mom_args_context :: Context }
-    type OptArgsList SGD'Mom = '["momentum"      ':= Float,
-                                 "wd"            ':= Float,
+instance Optimizer SGD_Opt where
+    newtype ReqArgs SGD_Opt = SGD Float
+    type OptArgsList SGD_Opt = '["wd"            ':= Float,
                                  "rescale_grad"  ':= Float,
                                  "clip_gradient" ':= Float]
-    makeOptimizer (SGD'Mom'Args lr shp cxt) args = do
-        mom <- A.makeEmptyNDArray shp cxt False
-        return $ SGD'Mom lr args mom
-    optimize (SGD'Mom lr args mom) _ weight gradient = A.NDArray <$> A.sgd_mom_update (A.getHandle weight) (A.getHandle gradient) (A.getHandle mom) lr args
+    makeOptimizer (SGD lr) args = return $ SGD_Opt lr args
+    optimize (SGD_Opt lr args) _ weight gradient = A.NDArray <$> A.sgd_update (A.getHandle weight) (A.getHandle gradient) lr args
+
+-- | SGD with momentum optimizer
+data SGD_Mom_Opt dtype args = SGD_Mom_Opt Float (HMap args) (IORef (M.HashMap String (NDArray dtype)))
+
+instance Optimizer SGD_Mom_Opt where
+    data ReqArgs SGD_Mom_Opt = SGD'Mom Float
+    type OptArgsList SGD_Mom_Opt = '["momentum"      ':= Float,
+                                     "wd"            ':= Float,
+                                     "rescale_grad"  ':= Float,
+                                     "clip_gradient" ':= Float]
+    makeOptimizer (SGD'Mom lr) args = do
+        empty <- newIORef M.empty
+        return $ SGD_Mom_Opt lr args empty
+
+    optimize (SGD_Mom_Opt lr args emaref) symbol weight gradient = do
+        ema <- readIORef emaref
+        momentum <- case M.lookup symbol ema of
+            Nothing    -> do
+                mom <- A.zeros_like (A.getHandle weight) 
+                writeIORef emaref (M.insert symbol (A.NDArray mom) ema)
+                return mom
+            Just a -> return (A.getHandle a)
+        A.NDArray <$> A.sgd_mom_update (A.getHandle weight) (A.getHandle gradient) momentum lr args
 
 -- | ADAM optmizer
-data ADAM dtype args = ADAM Float (HMap args) (IORef (M.HashMap String (NDArray dtype, NDArray dtype)))
+data ADAM_Opt dtype args = ADAM_Opt Float (HMap args) (IORef (M.HashMap String (NDArray dtype, NDArray dtype)))
 
-instance Optimizer ADAM where
-    newtype ReqArgs ADAM = ADAM'Args Float
-    type OptArgsList ADAM = '["beta1"         ':= Float,
-                              "beta2"         ':= Float,
-                              "epsilon"       ':= Float,
-                              "wd"            ':= Float,
-                              "rescale_grad"  ':= Float,
-                              "clip_gradient" ':= Float]
-    makeOptimizer (ADAM'Args lr) args = do
+instance Optimizer ADAM_Opt where
+    newtype ReqArgs ADAM_Opt = ADAM Float
+    type OptArgsList ADAM_Opt = '["beta1"         ':= Float,
+                                  "beta2"         ':= Float,
+                                  "epsilon"       ':= Float,
+                                  "wd"            ':= Float,
+                                  "rescale_grad"  ':= Float,
+                                  "clip_gradient" ':= Float]
+    makeOptimizer (ADAM lr) args = do
         empty <- newIORef M.empty
-        return $ ADAM lr args empty
+        return $ ADAM_Opt lr args empty
 
-    optimize (ADAM lr args emaref) symbol weight gradient = do
+    optimize (ADAM_Opt lr args emaref) symbol weight gradient = do
         ema <- readIORef emaref
         (moving_avg, moving_var) <- case M.lookup symbol ema of
             Nothing    -> do

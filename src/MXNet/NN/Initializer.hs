@@ -32,7 +32,7 @@ uniform sca shp cxt = A.NDArray <$> (A.random_uniform
 normal :: forall a. (DType a, Floating a) => Float -> Initializer a
 normal sigma shp cxt = A.NDArray <$> (A.random_normal 
                         $ add @"loc"    0
-                        $ add @"scale"  (fromRational $ toRational sigma)
+                        $ add @"scale"  sigma
                         $ add @"shape"  (formatShape shp)
                         $ add @"ctx"    (formatContext cxt) 
                         $ add @"dtype"  (typename (undefined :: a)) nil)
@@ -48,5 +48,5 @@ xavier magnitude distr factor (shp@[ofan,ifan]) cxt =
                   XavierAvg -> sqrt (magnitude * 2.0 / fromIntegral (ifan + ofan))
     in case distr of
          XavierUniform -> uniform scale shp cxt
-         XavierGaussian-> normal scale shp cxt
+         XavierGaussian-> normal  scale shp cxt
 xavier _ _ _ shp _ = throwM $ InvalidArgument $ "invalid shape " ++ show  shp ++ " for xavier initializer"
