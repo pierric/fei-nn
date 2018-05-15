@@ -67,7 +67,7 @@ range = enumFromTo 1
 
 default_initializer :: Initializer Float
 default_initializer shp@[_]   = zeros shp
-default_initializer shp@[_,_] = xavier 3.0 XavierUniform XavierIn shp
+default_initializer shp@[_,_] = xavier 2.0 XavierGaussian XavierIn shp
 default_initializer shp = normal 0.1 shp
 
 main :: IO ()
@@ -82,7 +82,7 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer (ADAM'Args 0.002) nil
+    optimizer <- makeOptimizer (SGD'Mom 0.0002) (add @"momentum" 0.9 $ add @"wd" 0.0001 nil)
 
     runResourceT $ train sess $ do 
 
