@@ -2,9 +2,7 @@
 module MXNet.NN.EvalMetric where
 
 import Data.IORef
-import Control.Exception.Base (Exception)
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Data.Typeable (Typeable)
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Text.Printf (printf)
@@ -13,6 +11,7 @@ import Control.Lens (makeLenses)
 import MXNet.Core.Base
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
+import MXNet.NN.Types
 
 -- | Metric data
 data Metric dytpe method = Metric {
@@ -62,7 +61,7 @@ instance EvalMetricMethod CrossEntropy where
     evaluate metric preds label = do
         (n1, shp1) <- A.ndshape preds
         (n2, shp2) <- A.ndshape label
-        when (n1 /= 2 || n2 /= 1 || head shp1 /= head shp2) (throwM InvalidInput)
+        when (n1 /= 2 || n2 /= 1 || head shp1 /= head shp2) (throwM $ MismatchedShapeInEval shp1 shp2)
         -- before call pick, we have to make sure preds and label 
         -- are in the same context
         preds_may_copy <- do
@@ -81,8 +80,4 @@ instance EvalMetricMethod CrossEntropy where
         modifyIORef (_metric_sum metric) (+ (negate $ loss SV.! 0))
         modifyIORef (_metric_instance metric) (+ head shp1)
 
--- | Possible exceptions in evaluation.
-data EvalMetricExc = InvalidInput
-    deriving (Show, Typeable)
-instance Exception EvalMetricExc
 

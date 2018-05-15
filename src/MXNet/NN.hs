@@ -29,13 +29,11 @@ import qualified MXNet.Core.Base.Executor as E
 import qualified MXNet.Core.Types.Internal as MXI
 import qualified MXNet.Core.Base.Internal.TH.NDArray as MXI
 import qualified Data.HashMap.Strict as M
-import Data.Typeable
 import qualified Control.Monad.State.Strict as ST
 import Data.Maybe (isJust, fromJust, maybe)
 import Control.Monad (when, zipWithM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Control.Exception.Base (Exception)
 import Control.Lens (traverseOf, use, (^.))
 
 import MXNet.NN.Types
@@ -57,23 +55,6 @@ inferShape sym known = do
     inps <- listInputs sym
     return $ M.fromList $ zip inps inp_shp
 
--- | For every symbol in the neural network, it can be placeholder or a variable.
--- therefore, a Config is to specify the shape of the placeholder and the 
--- method to initialize the variables.
--- 
--- Note that it is not right to specify a symbol as both placeholder and 
--- initializer, although it is tolerated and such a symbol is considered
--- as a variable.
--- 
--- Note that any symbol not specified will be initialized with the 
--- _cfg_default_initializer.
-data Config a = Config {
-    _cfg_placeholders :: M.HashMap String [Int],
-    _cfg_initializers :: M.HashMap String (Initializer a),
-    _cfg_default_initializer :: Initializer a,
-    _cfg_context :: Context
-}
-
 -- | initialize all parameters
 initialize :: DType a => Symbol a -> Config a -> IO (Session a)
 initialize sym config = do
@@ -93,8 +74,8 @@ initialize sym config = do
                 return $ Parameter in_arg (A.NDArray nullarg)
             Nothing -> do
                 arg_in <- case M.lookup inp spec2 of
-                    Just cinit -> cinit (_cfg_context config) shp
-                    Nothing    -> dinit (_cfg_context config) shp
+                    Just cinit -> cinit shp (_cfg_context config)
+                    Nothing    -> dinit shp (_cfg_context config)
                 arg_gr <- makeEmptyNDArray shp (_cfg_context config) False
                 return $ Parameter arg_in arg_gr
 
@@ -110,10 +91,10 @@ bind net dat train_ = do
             Just a  -> liftIO $ update_param (maybe (Right ishp) Left a) p
             Nothing -> do
                 (_, pshp1) <- liftIO $ ndshape (_param_in p)
-                when (ishp /= pshp1 ) (throwM $ MismatchedShape k)
+                when (ishp /= pshp1 ) (throwM $ MismatchedShapeOfSym k)
                 when train_ $ do
                     (_, pshp2) <- liftIO $ ndshape (_param_grad p)
-                    when (ishp /= pshp2) (throwM $ MismatchedShape k)
+                    when (ishp /= pshp2) (throwM $ MismatchedShapeOfSym k)
                 return p
 
     args <- use sess_param
@@ -216,11 +197,6 @@ forwardOnly net dat = do
 
 getContext :: Monad m => TrainM a m Context
 getContext = use sess_context
-
--- | Possible exception in 'TrainM'
-data Exc = MismatchedShape String
-    deriving (Show, Typeable)
-instance Exception Exc
 
 -- | modify the state within the inner monad
 -- 

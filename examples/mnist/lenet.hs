@@ -16,9 +16,9 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 import System.IO (hFlush, stdout)
 import MXNet.NN
-import MXNet.NN.Utils
 import MXNet.NN.Layer
 import MXNet.NN.EvalMetric
+import MXNet.NN.Initializer
 import MXNet.NN.DataIter.Class
 
 import DatasetVector
@@ -65,13 +65,11 @@ neural = do
 range :: Int -> [Int]
 range = enumFromTo 1
 
-default_initializer :: DType a => Initializer a
-default_initializer cxt shape = A.NDArray <$> A.random_normal 
-                                        (add @"loc" 0 $ 
-                                         add @"scale" 0.1 $ 
-                                         add @"shape" (formatShape shape) $ 
-                                         add @"ctx" (formatContext cxt) nil)
-    
+default_initializer :: Initializer Float
+default_initializer shp@[_]   = zeros shp
+default_initializer shp@[_,_] = xavier 3.0 XavierUniform XavierIn shp
+default_initializer shp = normal 0.1 shp
+
 main :: IO ()
 main = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized

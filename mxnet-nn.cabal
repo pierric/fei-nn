@@ -19,6 +19,7 @@ Library
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
                             MXNet.NN.EvalMetric
+                            MXNet.NN.Initializer
                             MXNet.NN.DataIter.Class
                             MXNet.NN.DataIter.LazyVec
     other-modules:
