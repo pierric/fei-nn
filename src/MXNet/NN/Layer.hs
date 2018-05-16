@@ -80,3 +80,19 @@ softmaxoutput :: (MatchKVList kvs '["grad_scale" ':= Float,
                   ShowKV kvs)
                => String -> SymbolHandle -> SymbolHandle -> HMap kvs -> IO SymbolHandle
 softmaxoutput = S.softmaxoutput
+
+batchnorm :: (MatchKVList kvs '["eps" ':= Double,
+                                "momentum" ':= Float,
+                                "fix_gamma" ':= Bool,
+                                "use_global_stats" ':= Bool,
+                                "output_mean_var" ':= Bool,
+                                "axis" ':= Int,
+                                "cudnn_off" ':= Bool]
+             ,ShowKV kvs)
+          => String -> SymbolHandle -> HMap kvs -> IO SymbolHandle
+batchnorm name dat args = do
+    gamma    <- variable (name ++ "-gamma")
+    beta     <- variable (name ++ "-beta")
+    mov_mean <- variable (name ++ "-moving-mean")
+    mov_var  <- variable (name ++ "-moving-var")
+    S.batchnorm name dat gamma beta mov_mean mov_var args
