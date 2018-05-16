@@ -109,7 +109,7 @@ residual name dat num_filter stride dim_match oargs = do
                     ( add @"eps" 2e-5 
                     $ add @"momentum" (get @"bn_mom" args)
                     $ add @"fix_gamma" False nil)
-        act1 <- activation (name ++ "-rule1") bn1 Relu
+        act1 <- activation (name ++ "-relu1") bn1 Relu
         conv1 <- convolution (name ++ "-conv1") act1 [1,1] (num_filter `div` 4) 
                     ( add @"stride" "[1,1]"
                     $ add @"pad"    "[0,0]"
@@ -119,7 +119,7 @@ residual name dat num_filter stride dim_match oargs = do
                     ( add @"eps" 2e-5 
                     $ add @"momentum" (get @"bn_mom" args)
                     $ add @"fix_gamma" False nil)
-        act2 <- activation (name ++ "-rule2") bn2 Relu
+        act2 <- activation (name ++ "-relu2") bn2 Relu
         conv2 <- convolution (name ++ "-conv2") act2 [3,3] (num_filter `div` 4) 
                     ( add @"stride" (show stride)
                     $ add @"pad"    "[1,1]"
@@ -129,7 +129,7 @@ residual name dat num_filter stride dim_match oargs = do
                     ( add @"eps" 2e-5 
                     $ add @"momentum" (get @"bn_mom" args)
                     $ add @"fix_gamma" False nil)
-        act3 <- activation (name ++ "-rule3") bn3 Relu
+        act3 <- activation (name ++ "-relu3") bn3 Relu
         conv3 <- convolution (name ++ "-conv3") act3 [1,1] num_filter 
                     ( add @"stride" "[1,1]"
                     $ add @"pad"    "[0,0]"
@@ -148,7 +148,7 @@ residual name dat num_filter stride dim_match oargs = do
                     ( add @"eps" 2e-5 
                     $ add @"momentum" (get @"bn_mom" args)
                     $ add @"fix_gamma" False nil)
-        act1 <- activation (name ++ "-rule1") bn1 Relu
+        act1 <- activation (name ++ "-relu1") bn1 Relu
         conv1 <- convolution (name ++ "-conv1") act1 [3,3] num_filter 
                     ( add @"stride" (show stride)
                     $ add @"pad"    "[1,1]"
@@ -158,7 +158,7 @@ residual name dat num_filter stride dim_match oargs = do
                     ( add @"eps" 2e-5 
                     $ add @"momentum" (get @"bn_mom" args)
                     $ add @"fix_gamma" False nil)
-        act2 <- activation (name ++ "-rule2") bn2 Relu
+        act2 <- activation (name ++ "-relu2") bn2 Relu
         conv2 <- convolution (name ++ "-conv2") act2 [3,3] num_filter 
                     ( add @"stride" "[1,1]"
                     $ add @"pad"    "[1,1]"
