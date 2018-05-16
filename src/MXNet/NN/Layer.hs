@@ -172,3 +172,14 @@ residual name dat num_filter stride dim_match oargs = do
                             $ add @"no_bias" True nil)
         when (get @"memonger" args) $ void $ I.mxSymbolSetAttr shortcut "mirror_stage" "true"
         S._Plus name conv2 shortcut
+
+data DType = AsFloat16 | AsFloat32 | AsFloat64 | AsUInt8 | AsInt32
+cast :: String -> SymbolHandle -> DType -> IO SymbolHandle
+cast name dat dtyp = S.cast name dat typ
+  where
+    typ = case dtyp of 
+            AsFloat16 -> "float16"
+            AsFloat32 -> "float32"
+            AsFloat64 -> "float64" 
+            AsUInt8   -> "uint8"
+            AsInt32   -> "int32"
