@@ -82,7 +82,7 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer (SGD'Mom 0.0002) (add @"momentum" 0.9 $ add @"wd" 0.0001 nil)
+    optimizer <- makeOptimizer (SGD'Mom 0.0002) (add @"momentum" (0.9 :: Float) $ add @"wd" (0.0001 :: Float) nil)
 
     runResourceT $ train sess $ do 
 
@@ -121,4 +121,4 @@ main = do
   
   where
     argmax :: ArrayF -> IO ArrayF
-    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) (add @"axis" 1 nil)
+    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) (add @"axis" (1 :: Int) nil)

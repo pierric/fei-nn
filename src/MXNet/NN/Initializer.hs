@@ -31,7 +31,7 @@ uniform sca shp cxt = A.NDArray <$> (A.random_uniform
 
 normal :: forall a. (DType a, Floating a) => Float -> Initializer a
 normal sigma shp cxt = A.NDArray <$> (A.random_normal 
-                        $ add @"loc"    0
+                        $ add @"loc"    (0 :: Float)
                         $ add @"scale"  sigma
                         $ add @"shape"  (formatShape shp)
                         $ add @"ctx"    (formatContext cxt) 

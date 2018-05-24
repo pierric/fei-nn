@@ -1,11 +1,11 @@
 # GHC 8.0.2 has a bug, which may leads to OOM
 # https://ghc.haskell.org/trac/ghc/ticket/13615
-resolver: lts-10.7
+resolver: lts-11.10
 packages:
 - .
 extra-deps:
 - git: https://github.com/pierric/mxnet-haskell.git
-  commit: fb37b5e3a2016248c990b704e2830cd274ac684b 
+  commit: 538558df921dca919fea15faa5bb4152bc5348d4 
   subdirs:
   - mxnet
 - c2hs-extra-0.1.0.1

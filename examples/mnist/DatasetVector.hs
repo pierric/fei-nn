@@ -16,29 +16,29 @@ import Parse
 type SymbolF = Symbol Float
 type ArrayF  = NDArray Float
 
-loadTrainingData :: MonadResource m => m (VL.LVec (ArrayF, ArrayF))
+loadTrainingData :: (MonadResource m, MonadThrow m) => m (VL.LVec (ArrayF, ArrayF))
 loadTrainingData = do
     v1 <- sourceImages "examples/data/train-images-idx3-ubyte" >>= liftIO . batch 128
     v2 <- sourceLabels "examples/data/train-labels-idx1-ubyte" >>= liftIO . batch 128
     return $ VL.zip (VL.map cImageToNDArray v1) (VL.map cLabelToNDArray v2)
 
-loadTestingData :: MonadResource m => m (VL.LVec (ArrayF, ArrayF))
+loadTestingData :: (MonadResource m, MonadThrow m) => m (VL.LVec (ArrayF, ArrayF))
 loadTestingData = do
     v1 <- sourceImages "examples/data/t10k-images-idx3-ubyte" >>= liftIO . batch 1
     v2 <- sourceLabels "examples/data/t10k-labels-idx1-ubyte" >>= liftIO . batch 1
     return $ VL.zip (VL.map cImageToNDArray v1) (VL.map cLabelToNDArray v2)
 
-sourceImages :: MonadResource m => FilePath -> m (VL.LVec Image)
+sourceImages :: (MonadResource m, MonadThrow m) => FilePath -> m (VL.LVec Image)
 sourceImages = parseFile $ do
     HeaderImg n w h <- header
     count n (image w h)
 
-sourceLabels :: MonadResource m => FilePath -> m (VL.LVec Label)
+sourceLabels :: (MonadResource m, MonadThrow m) => FilePath -> m (VL.LVec Label)
 sourceLabels = parseFile $ do
     HeaderLbl n <- header
     count n label    
 
-parseFile :: MonadResource m => Parser [a] -> FilePath -> m (VL.LVec a)
+parseFile :: (MonadResource m, MonadThrow m) => Parser [a] -> FilePath -> m (VL.LVec a)
 parseFile parser fp = do
     content <- liftIO $ BS.readFile fp
     case AP.parseOnly parser content of
