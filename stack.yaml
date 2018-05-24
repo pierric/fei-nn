@@ -5,7 +5,7 @@ packages:
 - .
 extra-deps:
 - git: https://github.com/pierric/mxnet-haskell.git
-  commit: 538558df921dca919fea15faa5bb4152bc5348d4 
+  commit: d6358874c45bdebc35a151ebd6e1b861acfee738 
   subdirs:
   - mxnet
 - c2hs-extra-0.1.0.1
