@@ -91,10 +91,10 @@ bind net dat train_ = do
             Just a  -> liftIO $ update_param (maybe (Right ishp) Left a) p
             Nothing -> do
                 (_, pshp1) <- liftIO $ ndshape (_param_in p)
-                when (ishp /= pshp1 ) (throwM $ MismatchedShapeOfSym k)
+                when (ishp /= pshp1 ) (throwM $ MismatchedShapeOfSym (k ++ "[i]") ishp pshp1)
                 when train_ $ do
                     (_, pshp2) <- liftIO $ ndshape (_param_grad p)
-                    when (ishp /= pshp2) (throwM $ MismatchedShapeOfSym k)
+                    when (ishp /= pshp2) (throwM $ MismatchedShapeOfSym (k ++ "[t]") ishp pshp2)
                 return p
 
     args <- use sess_param

@@ -43,7 +43,7 @@ data Config a = Config {
 type Initializer a = [Int] -> Context -> IO (NDArray a)
 
 -- | Possible exception in 'TrainM'
-data Exc = MismatchedShapeOfSym String 
+data Exc = MismatchedShapeOfSym String [Int] [Int]
          | MismatchedShapeInEval [Int] [Int]
          | InvalidArgument String
     deriving (Show, Typeable)
