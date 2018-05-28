@@ -9,7 +9,8 @@ import Data.Typeable (Typeable)
 import MXNet.Core.Base hiding (bind, context, (^.))
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
-data Parameter a = Parameter { _param_in :: NDArray a, _param_grad :: NDArray a }
+data Parameter a = ParameterI { _param_in :: NDArray a, _param_grad :: NDArray a }
+                 | ParameterA { _param_aux :: NDArray a }
     deriving Show
 
 -- | Session is all the 'Parameters' and a 'Context'
