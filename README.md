@@ -39,4 +39,5 @@ Fit the neural network, and also record the evaluation.
 Given a the symbolic graph, and feeding the placeholders (data with `Just xx`, and label with `Nothing`). `forwardOnly` carries out a forward phase only, returning the output of the neural network.
 
 # Usage
-Please see the example in the `examples` directory.
+- Please see the example in the `examples` directory.
+- Also see the examples of [mxnet-dataiter](https://github.com/pierric/mxnet-dataiter) project.
