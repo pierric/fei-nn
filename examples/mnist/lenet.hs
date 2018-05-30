@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE QuasiQuotes #-}
 module Main where
 
 import MXNet.Core.Base (DType, contextCPU, contextGPU, mxListAllOpNames)
@@ -20,6 +21,7 @@ import MXNet.NN.Layer
 import MXNet.NN.EvalMetric
 import MXNet.NN.Initializer
 import MXNet.NN.DataIter.Class
+import MXNet.NN.Utils.HMap
 
 import DatasetVector
 
@@ -82,7 +84,7 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer (SGD'Mom 0.0002) (add @"momentum" (0.9 :: Float) $ add @"wd" (0.0001 :: Float) nil)
+    optimizer <- makeOptimizer (SGD'Mom 0.0002) [hm| momentum := 0.9 :: Float, wd := 0.0001 :: Float |]
 
     runResourceT $ train sess $ do 
 
@@ -121,4 +123,4 @@ main = do
   
   where
     argmax :: ArrayF -> IO ArrayF
-    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) (add @"axis" (1 :: Int) nil)
+    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) [hm| axis := 1::Int |]

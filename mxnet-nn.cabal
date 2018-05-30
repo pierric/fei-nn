@@ -16,6 +16,7 @@ Library
     exposed-modules:        MXNet.NN
                             MXNet.NN.Types
                             MXNet.NN.Utils
+                            MXNet.NN.Utils.HMap
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
                             MXNet.NN.EvalMetric
@@ -35,6 +36,8 @@ Library
                           , mtl >= 2.2
                           , lens >= 4.12
                           , transformers-base >= 0.4.4
+                          , template-haskell >= 2.12
+                          , haskell-src-meta >= 0.8
 
 Executable lenet
     main-is:                lenet.hs
@@ -53,8 +56,5 @@ Executable lenet
                           , exceptions >= 0.8.3
                           , mmorph >= 1.0.9
                           , mtl >= 2.2.0
-                          , streaming >= 0.1.4.5
-                          , streaming-utils >= 0.1.4.5
-                          , streaming-bytestring >= 0.1.4.5
                           , ghc-prim
                           , mxnet-nn

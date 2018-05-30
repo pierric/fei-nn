@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module MXNet.NN.Layer where
 
@@ -11,6 +12,7 @@ import MXNet.Core.Base.HMap
 import qualified MXNet.Core.Base.Internal.TH.Symbol as S
 import qualified MXNet.Core.Base.Internal as I
 import MXNet.NN.Utils
+import MXNet.NN.Utils.HMap
 
 variable :: String -> IO SymbolHandle
 variable = I.checked . I.mxSymbolCreateVariable
@@ -117,70 +119,70 @@ residual name dat num_filter stride dim_match oargs = do
     if get @"bottle_neck" args 
       then do
         bn1 <- batchnorm (name ++ "-bn1") dat 
-                    ( add @"eps" eps
-                    $ add @"momentum" bn_mom
-                    $ add @"fix_gamma" False nil)
+                    [hm| eps       := eps
+                       , momentum  := bn_mom
+                       , fix_gamma := False |]
         act1 <- activation (name ++ "-relu1") bn1 Relu
         conv1 <- convolution (name ++ "-conv1") act1 [1,1] (num_filter `div` 4) 
-                    ( add @"stride" "[1,1]"
-                    $ add @"pad"    "[0,0]"
-                    $ add @"workspace" workspace
-                    $ add @"no_bias" True nil)
+                    [hm| stride    := "[1,1]"
+                       , pad       := "[0,0]"
+                       , workspace := workspace
+                       , no_bias   := True |]
         bn2 <- batchnorm (name ++ "-bn2") conv1 
-                    ( add @"eps" eps
-                    $ add @"momentum" bn_mom
-                    $ add @"fix_gamma" False nil)
+                    [hm| eps       := eps
+                       , momentum  := bn_mom
+                       , fix_gamma := False |]
         act2 <- activation (name ++ "-relu2") bn2 Relu
         conv2 <- convolution (name ++ "-conv2") act2 [3,3] (num_filter `div` 4) 
-                    ( add @"stride" (show stride)
-                    $ add @"pad"    "[1,1]"
-                    $ add @"workspace" workspace
-                    $ add @"no_bias" True nil)
+                    [hm| stride    := (show stride)
+                       , pad       := "[1,1]"
+                       , workspace := workspace
+                       , no_bias   := True |]
         bn3 <- batchnorm (name ++ "-bn3") conv2
-                    ( add @"eps" eps
-                    $ add @"momentum" bn_mom
-                    $ add @"fix_gamma" False nil)
+                    [hm| eps       := eps
+                       , momentum  := bn_mom
+                       , fix_gamma := False |]
         act3 <- activation (name ++ "-relu3") bn3 Relu
         conv3 <- convolution (name ++ "-conv3") act3 [1,1] num_filter 
-                    ( add @"stride" "[1,1]"
-                    $ add @"pad"    "[0,0]"
-                    $ add @"workspace" workspace
-                    $ add @"no_bias" True nil)
+                    [hm| stride    := "[1,1]"
+                       , pad       := "[0,0]"
+                       , workspace := workspace
+                       , no_bias   := True |]
         shortcut <- if dim_match
                     then return dat
                     else convolution (name ++ "-sc") act1 [1,1] num_filter 
-                            ( add @"stride" (show stride)
-                            $ add @"workspace" workspace
-                            $ add @"no_bias" True nil)
+                            [hm| stride    := (show stride)
+                               , workspace := workspace
+                               , no_bias   := True |]
         when (get @"memonger" args) $ void $ I.mxSymbolSetAttr shortcut "mirror_stage" "true"
         S._Plus name conv3 shortcut
       else do
         bn1 <- batchnorm (name ++ "-bn1") dat 
-                    ( add @"eps" eps
-                    $ add @"momentum" bn_mom
-                    $ add @"fix_gamma" False nil)
+                    [hm| eps       := eps
+                       , momentum  := bn_mom
+                       , fix_gamma := False |]
         act1 <- activation (name ++ "-relu1") bn1 Relu
         conv1 <- convolution (name ++ "-conv1") act1 [3,3] num_filter 
-                    ( add @"stride" (show stride)
-                    $ add @"pad"    "[1,1]"
-                    $ add @"workspace" workspace
-                    $ add @"no_bias" True nil)
+                    [hm| stride    := (show stride)
+                       , pad       :="[1,1]"
+                       , workspace := workspace
+                       , no_bias   := True |]
         bn2 <- batchnorm (name ++ "-bn2") conv1 
-                    ( add @"eps" eps
-                    $ add @"momentum" bn_mom
-                    $ add @"fix_gamma" False nil)
+                    [hm| eps       := eps
+                       , momentum  := bn_mom
+                       , fix_gamma := False |]
         act2 <- activation (name ++ "-relu2") bn2 Relu
         conv2 <- convolution (name ++ "-conv2") act2 [3,3] num_filter 
-                    ( add @"stride" "[1,1]"
-                    $ add @"pad"    "[1,1]"
-                    $ add @"workspace" workspace
-                    $ add @"no_bias" True nil)
+                    [hm| stride    := "[1,1]"
+                       , pad       := "[1,1]"
+                       , workspace := workspace
+                       , no_bias   := True |]
         shortcut <- if dim_match
                     then return dat
                     else convolution (name ++ "-sc") act1 [1,1] num_filter 
-                            ( add @"stride" (show stride)
-                            $ add @"workspace" workspace
-                            $ add @"no_bias" True nil)
+                            [hm| stride    := (show stride)
+                               , workspace := workspace
+                               , no_bias   := True |]
         when (get @"memonger" args) $ void $ I.mxSymbolSetAttr shortcut "mirror_stage" "true"
         S._Plus name conv2 shortcut
 

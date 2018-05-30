@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE QuasiQuotes #-}
 module MXNet.NN.Initializer where
 
 import MXNet.Core.Base
@@ -11,6 +12,7 @@ import Control.Monad.Trans.Resource (MonadThrow(..))
 
 import MXNet.NN.Types
 import MXNet.NN.Utils
+import MXNet.NN.Utils.HMap
 
 zeros :: DType a => Initializer a
 zeros = constant 0
@@ -23,19 +25,19 @@ constant val shp cxt = makeNDArray shp cxt $ SV.replicate (product shp) val
 
 uniform :: forall a. (DType a, Floating a) => Float -> Initializer a
 uniform sca shp cxt = A.NDArray <$> (A.random_uniform 
-                        $ add @"low"    (-sca) 
-                        $ add @"high"   sca
-                        $ add @"shape"  (formatShape shp)
-                        $ add @"ctx"    (formatContext cxt)
-                        $ add @"dtype"  (typename (undefined :: a)) nil)
+                            [hm| low    := (-sca) 
+                               , high   := sca
+                               , shape  := (formatShape shp)
+                               , ctx    := (formatContext cxt)
+                               , dtype  := (typename (undefined :: a)) |])
 
 normal :: forall a. (DType a, Floating a) => Float -> Initializer a
 normal sigma shp cxt = A.NDArray <$> (A.random_normal 
-                        $ add @"loc"    (0 :: Float)
-                        $ add @"scale"  sigma
-                        $ add @"shape"  (formatShape shp)
-                        $ add @"ctx"    (formatContext cxt) 
-                        $ add @"dtype"  (typename (undefined :: a)) nil)
+                            [hm| loc    := (0 :: Float)
+                               , scale  := sigma
+                               , shape  := (formatShape shp)
+                               , ctx    := (formatContext cxt) 
+                               , dtype  := (typename (undefined :: a)) |])
 
 data XavierFactor = XavierAvg | XavierIn | XavierOut
 data XavierRandom = XavierUniform | XavierGaussian
