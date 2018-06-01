@@ -25,7 +25,7 @@ constant val shp cxt = makeNDArray shp cxt $ SV.replicate (product shp) val
 
 uniform :: forall a. (DType a, Floating a) => Float -> Initializer a
 uniform sca shp cxt = A.NDArray <$> (A.random_uniform 
-                            [hm| low    := (-sca) 
+                             [α| low    := (-sca) 
                                , high   := sca
                                , shape  := (formatShape shp)
                                , ctx    := (formatContext cxt)
@@ -33,7 +33,7 @@ uniform sca shp cxt = A.NDArray <$> (A.random_uniform
 
 normal :: forall a. (DType a, Floating a) => Float -> Initializer a
 normal sigma shp cxt = A.NDArray <$> (A.random_normal 
-                            [hm| loc    := (0 :: Float)
+                             [α| loc    := (0 :: Float)
                                , scale  := sigma
                                , shape  := (formatShape shp)
                                , ctx    := (formatContext cxt) 

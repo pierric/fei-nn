@@ -84,7 +84,7 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer (SGD'Mom 0.0002) [hm| momentum := 0.9 :: Float, wd := 0.0001 :: Float |]
+    optimizer <- makeOptimizer (SGD'Mom 0.0002) [α| momentum := 0.9 :: Float, wd := 0.0001 :: Float |]
 
     runResourceT $ train sess $ do 
 
@@ -123,4 +123,4 @@ main = do
   
   where
     argmax :: ArrayF -> IO ArrayF
-    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) [hm| axis := 1::Int |]
+    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) [α| axis := 1::Int |]

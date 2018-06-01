@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-module MXNet.NN.Utils.HMap (hm) where
+module MXNet.NN.Utils.HMap (hmap, α) where
 
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote
@@ -8,11 +8,15 @@ import qualified Data.Char as Char
 import Language.Haskell.Meta.Parse
 import qualified MXNet.Core.Base.HMap as M
 
-hm :: QuasiQuoter
-hm = QuasiQuoter { quoteExp = parseHMap
-                 , quotePat = undefined
-                 , quoteType= undefined
-                 , quoteDec = undefined }
+hmap :: QuasiQuoter
+hmap = QuasiQuoter { quoteExp = parseHMap
+                   , quotePat = undefined
+                   , quoteType= undefined
+                   , quoteDec = undefined }
+
+-- | Small letter Alpha (Unicode U+03B1), as abbr and synonym of 'hmap'
+α :: QuasiQuoter
+α = hmap
 
 parseHMap :: String -> Q Exp
 parseHMap src = case pr of 
