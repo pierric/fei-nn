@@ -86,8 +86,8 @@ dotGraph sym = do
               node id [α| label := _node_name, shape := GV.Ellipse, fillcolor := colors !! 0 |]
         "Convolution" -> 
             let attr = fromJust $ _node_attrs
-                krnl = fromJust $ M.lookup "kernel" attr
-                strd = fromMaybe "1" $ M.lookup "stride" attr
+                krnl = formatTuple (fromJust $ M.lookup "kernel" attr)
+                strd = formatTuple (fromMaybe "1" $ M.lookup "stride" attr)
                 nflt = fromJust $ M.lookup "num_filter" attr
                 lbl = printf "Convolution\n%s/%s, %s" krnl strd nflt
             in node id [α| label := lbl :: String, fillcolor := colors !! 1 |]
@@ -111,8 +111,8 @@ dotGraph sym = do
         "Pooling" ->
             let attr = fromJust $ _node_attrs
                 poot = fromJust $ M.lookup "pool_type" attr
-                krnl = fromJust $ M.lookup "kernel" attr
-                strd = fromMaybe "1" $ M.lookup "stride" attr
+                krnl = formatTuple (fromJust $ M.lookup "kernel" attr)
+                strd = formatTuple (fromMaybe "1" $ M.lookup "stride" attr)
                 lbl = printf "Pooling\n%s, %s/%s" poot krnl strd
             in node id [α| label := lbl :: String, fillcolor := colors !! 4 |]
         "Concat" -> 
@@ -175,6 +175,12 @@ color ['#',r1,r2,g1,g2,b1,b2] = do
     b <- dec [b1,b2]
     return $ GV.RGB r g b
 color _ = Nothing
+
+formatTuple :: String -> String
+formatTuple str 
+    | [((a,b),"")] <- (reads :: ReadS (Int,Int)) str = printf "%dx%d" a b
+    | [([a,b],"")] <- (reads :: ReadS [Int]) str     = printf "%dx%d" a b
+    | otherwise = str
 
 data Exc = CannotDecodeJSONofSymbol
     deriving (Show, Typeable)
