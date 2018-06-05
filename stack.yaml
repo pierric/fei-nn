@@ -11,6 +11,8 @@ extra-deps:
 - c2hs-extra-0.1.0.1
 - tuple-ops-0.0.0.1
 - streaming-utils-0.1.4.7
+- graphviz-2999.19.0.0
+- fgl-5.5.4.0
 extra-include-dirs:
 - /home/jwu/incubator-mxnet/include
 - /home/jwu/incubator-mxnet/nnvm/include/

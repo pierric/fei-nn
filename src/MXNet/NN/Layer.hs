@@ -29,12 +29,12 @@ convolution :: (MatchKVList kvs '["stride"     ':= String,
                ,ShowKV kvs, QueryKV kvs)
             => String -> SymbolHandle -> [Int] -> Int -> HMap kvs -> IO SymbolHandle
 convolution name dat kernel_shape num_filter args = do
-    w <- variable (name ++ "-w")
+    w <- variable (name ++ "-weight")
     if query @"no_bias" args == Just True
       then 
         S.convolution name dat w Nothing (formatShape kernel_shape) num_filter args
       else do
-        b <- variable (name ++ "-b")
+        b <- variable (name ++ "-bias")
         S.convolution name dat w (Just b) (formatShape kernel_shape) num_filter args
 
 fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool, 
@@ -42,12 +42,12 @@ fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool,
                   ,ShowKV kvs, QueryKV kvs) 
                => String -> SymbolHandle -> Int -> HMap kvs -> IO SymbolHandle
 fullyConnected name dat num_neuron args = do
-    w <- variable (name ++ "-w")
+    w <- variable (name ++ "-weight")
     if query @"no_bias" args == Just True
       then 
         S.fullyconnected name dat w Nothing num_neuron args
       else do
-        b <- variable (name ++ "-b")
+        b <- variable (name ++ "-bias")
         S.fullyconnected name dat w (Just b) num_neuron args
 
 data PoolingMethod = PoolingMax | PoolingAvg | PoolingSum
