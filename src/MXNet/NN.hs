@@ -79,13 +79,13 @@ initialize sym config = do
                 return $ ParameterI in_arg (A.NDArray nullarg)
             Nothing -> do
                 arg_in <- case M.lookup inp spec2 of
-                    Just cinit -> cinit shp (_cfg_context config)
-                    Nothing    -> dinit shp (_cfg_context config)
+                    Just cinit -> cinit inp shp (_cfg_context config)
+                    Nothing    -> dinit inp shp (_cfg_context config)
                 arg_gr <- makeEmptyNDArray shp (_cfg_context config) False
                 return $ ParameterI arg_in arg_gr
     -- initialize auxiliary symbols.
     initA dinit aux shp = do
-        arg_aux <- dinit shp (_cfg_context config)
+        arg_aux <- dinit aux shp (_cfg_context config)
         return $ ParameterA arg_aux
 
 -- | bind the symbolic network with actual parameters

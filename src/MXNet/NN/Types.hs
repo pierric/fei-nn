@@ -37,11 +37,11 @@ data Config a = Config {
     _cfg_context :: Context
 }
 
--- | Initializer is about how to create a NDArray from a given shape. 
+-- | Initializer is about how to create a NDArray from the symbol name and the given shape. 
 -- 
 -- Usually, it can be a wrapper of MXNet operators, such as @random_uniform@, @random_normal@, 
 -- @random_gamma@, etc..
-type Initializer a = [Int] -> Context -> IO (NDArray a)
+type Initializer a = String -> [Int] -> Context -> IO (NDArray a)
 
 -- | Possible exception in 'TrainM'
 data Exc = MismatchedShapeOfSym String [Int] [Int]
