@@ -4,7 +4,22 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE QuasiQuotes #-}
 
-module MXNet.NN.Layer where
+module MXNet.NN.Layer (
+  variable,
+  convolution,
+  fullyConnected,
+  PoolingMethod(..),
+  pooling,
+  ActivationType(..),
+  activation,
+  softmaxoutput,
+  batchnorm,
+  residual,
+  AsDType(..),
+  cast,
+  S.flatten,
+  S.identity,
+) where
 
 import Control.Monad (when, void)
 import MXNet.Core.Types.Internal
@@ -65,9 +80,6 @@ pooling :: (MatchKVList kvs '["global_pool" ':= Bool,
            ,ShowKV kvs)
         => String -> SymbolHandle -> [Int] -> PoolingMethod -> HMap kvs -> IO SymbolHandle
 pooling name input shape method args = S.pooling name input (formatShape shape) (poolingMethodToStr method) args
-
-flatten :: String -> SymbolHandle -> IO SymbolHandle
-flatten = S.flatten
 
 data ActivationType = Relu | Sigmoid | Tanh | SoftRelu
 
@@ -186,8 +198,8 @@ residual name dat num_filter stride dim_match oargs = do
         when (get @"memonger" args) $ void $ I.mxSymbolSetAttr shortcut "mirror_stage" "true"
         S._Plus name conv2 shortcut
 
-data DType = AsFloat16 | AsFloat32 | AsFloat64 | AsUInt8 | AsInt32
-cast :: String -> SymbolHandle -> DType -> IO SymbolHandle
+data AsDType = AsFloat16 | AsFloat32 | AsFloat64 | AsUInt8 | AsInt32
+cast :: String -> SymbolHandle -> AsDType -> IO SymbolHandle
 cast name dat dtyp = S.cast name dat typ
   where
     typ = case dtyp of 
