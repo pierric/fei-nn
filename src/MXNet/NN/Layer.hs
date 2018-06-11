@@ -21,13 +21,11 @@ module MXNet.NN.Layer (
   S.identity,
 ) where
 
-import Control.Monad (when, void)
 import MXNet.Core.Types.Internal
 import MXNet.Core.Base.HMap
 import qualified MXNet.Core.Base.Internal.TH.Symbol as S
 import qualified MXNet.Core.Base.Internal as I
 import MXNet.NN.Utils
-import MXNet.NN.Utils.HMap
 
 variable :: String -> IO SymbolHandle
 variable = I.checked . I.mxSymbolCreateVariable
@@ -131,4 +129,5 @@ cast name dat dtyp = S.cast name dat typ
             AsUInt8   -> "uint8"
             AsInt32   -> "int32"
 
+plus :: String -> SymbolHandle -> SymbolHandle -> IO SymbolHandle
 plus = S._Plus
