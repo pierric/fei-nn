@@ -36,19 +36,21 @@ class Optimizer (opt :: * -> [KV *] -> *) where
     -- | run the optimizer with the input & expected tensor
     optimize :: (OptArgsCst opt oargs, DType dtype) => opt dtype oargs -> Int -> String -> NDArray dytpe -> NDArray dtype -> IO (NDArray dtype)
 
+data Base_Opt args = forall sch. LrScheduler sch => Base_Opt sch (HMap args)
+
 -- | SGD optimizer
-data SGD_Opt dtype args = forall sch. LrScheduler sch => SGD_Opt sch (HMap args)
+data SGD_Opt dtype args = SGD_Opt (Base_Opt args)
 
 instance Optimizer SGD_Opt where
     data ReqArgs SGD_Opt = forall sch. LrScheduler sch => SGD sch
     type OptArgsList SGD_Opt = '["wd"            ':= Float,
                                  "rescale_grad"  ':= Float,
                                  "clip_gradient" ':= Float]
-    makeOptimizer (SGD sch) args = return $ SGD_Opt sch args
-    optimize (SGD_Opt sch args) nup _ weight gradient = A.NDArray <$> A.sgd_update (A.getHandle weight) (A.getHandle gradient) (getLR sch nup) args
+    makeOptimizer (SGD sch) args = return $ SGD_Opt $ Base_Opt sch args
+    optimize (SGD_Opt (Base_Opt sch args)) nup _ weight gradient = A.NDArray <$> A.sgd_update (A.getHandle weight) (A.getHandle gradient) (getLR sch nup) args
 
 -- | SGD with momentum optimizer
-data SGD_Mom_Opt dtype args = forall sch. LrScheduler sch => SGD_Mom_Opt sch (HMap args) (IORef (M.HashMap String (NDArray dtype)))
+data SGD_Mom_Opt dtype args = SGD_Mom_Opt (Base_Opt args) (IORef (M.HashMap String (NDArray dtype)))
 
 instance Optimizer SGD_Mom_Opt where
     data ReqArgs SGD_Mom_Opt = forall sch. LrScheduler sch => SGD'Mom sch
@@ -58,9 +60,9 @@ instance Optimizer SGD_Mom_Opt where
                                      "clip_gradient" ':= Float]
     makeOptimizer (SGD'Mom sch) args = do
         empty <- newIORef M.empty
-        return $ SGD_Mom_Opt sch args empty
+        return $ SGD_Mom_Opt (Base_Opt sch args) empty
 
-    optimize (SGD_Mom_Opt sch args emaref) nup symbol weight gradient = do
+    optimize (SGD_Mom_Opt (Base_Opt sch args) emaref) nup symbol weight gradient = do
         ema <- readIORef emaref
         momentum <- case M.lookup symbol ema of
             Nothing    -> do
@@ -71,7 +73,7 @@ instance Optimizer SGD_Mom_Opt where
         A.NDArray <$> A.sgd_mom_update (A.getHandle weight) (A.getHandle gradient) momentum (getLR sch nup) args
 
 -- | ADAM optmizer
-data ADAM_Opt dtype args = forall sch. LrScheduler sch => ADAM_Opt sch (HMap args) (IORef (M.HashMap String (NDArray dtype, NDArray dtype)))
+data ADAM_Opt dtype args = ADAM_Opt (Base_Opt args) (IORef (M.HashMap String (NDArray dtype, NDArray dtype)))
 
 instance Optimizer ADAM_Opt where
     data ReqArgs ADAM_Opt = forall sch. LrScheduler sch => ADAM sch
@@ -83,9 +85,9 @@ instance Optimizer ADAM_Opt where
                                   "clip_gradient" ':= Float]
     makeOptimizer (ADAM sch) args = do
         empty <- newIORef M.empty
-        return $ ADAM_Opt sch args empty
+        return $ ADAM_Opt (Base_Opt sch args) empty
 
-    optimize (ADAM_Opt sch args emaref) nup symbol weight gradient = do
+    optimize (ADAM_Opt (Base_Opt sch args) emaref) nup symbol weight gradient = do
         ema <- readIORef emaref
         (moving_avg, moving_var) <- case M.lookup symbol ema of
             Nothing    -> do
