@@ -18,7 +18,11 @@ module MXNet.NN (
     getContext,
     sess_param,
     sess_context,
-    module MXNet.NN.Optimizer
+    module MXNet.NN.Optimizer,
+    module MXNet.NN.LrScheduler,
+    module MXNet.NN.EvalMetric,
+    module MXNet.NN.Initializer,
+    module MXNet.NN.Layer,
 ) where
 
 import MXNet.Core.Base hiding (bind, context, (^.))
@@ -34,11 +38,14 @@ import Data.Maybe (isJust, fromJust, maybe)
 import Control.Monad (when, zipWithM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Control.Lens (traverseOf, use, (^.), (%=))
+import Control.Lens (traverseOf, use, (^.), (+=))
 
 import MXNet.NN.Types
 import MXNet.NN.Optimizer
 import MXNet.NN.EvalMetric
+import MXNet.NN.Layer
+import MXNet.NN.Initializer
+import MXNet.NN.LrScheduler
 
 -- | Execute the 'TrainM' monad
 train :: (DType a, Monad m) => Session a -> TrainM a m r -> m r
@@ -203,12 +210,13 @@ fitAndEval opt net datAndLbl metric = do
 updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args, DType dtype) 
                  => opt dtype args -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
-    sess_num_upd %= (+1)
+    nup <- use sess_num_upd
+    sess_num_upd += 1
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         case v of 
           ParameterI {} -> do 
             if (not $ M.member k blacklist)
-                then do new_in <- liftIO $ optimize opt k (_param_in v) (_param_grad v) 
+                then do new_in <- liftIO $ optimize opt nup k (_param_in v) (_param_grad v) 
                         -- must evaluate the new parameter to WHNF
                         -- otherwise, the old _param_in is retained.
                         -- if context is GPU, then OOM will soon 

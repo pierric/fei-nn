@@ -5,7 +5,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Main where
 
-import MXNet.Core.Base (DType, contextCPU, contextGPU, mxListAllOpNames)
+import MXNet.Core.Base (contextCPU, contextGPU, mxListAllOpNames)
 import MXNet.Core.Base.HMap
 import qualified MXNet.Core.Base.NDArray as A
 import qualified MXNet.Core.Base.Internal.TH.NDArray as A
@@ -17,9 +17,6 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 import System.IO (hFlush, stdout)
 import MXNet.NN
-import MXNet.NN.Layer
-import MXNet.NN.EvalMetric
-import MXNet.NN.Initializer
 import MXNet.NN.DataIter.Class
 import MXNet.NN.Utils.HMap
 
@@ -84,7 +81,7 @@ main = do
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer (SGD'Mom 0.0002) [α| momentum := 0.9 :: Float, wd := 0.0001 :: Float |]
+    optimizer <- makeOptimizer (SGD'Mom $ Const 0.0002) [α| momentum := 0.9 :: Float, wd := 0.0001 :: Float |]
 
     runResourceT $ train sess $ do 
 
