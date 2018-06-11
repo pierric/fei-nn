@@ -20,6 +20,7 @@ Library
                             MXNet.NN.Utils.GraphViz
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
+                            MXNet.NN.LrScheduler
                             MXNet.NN.EvalMetric
                             MXNet.NN.Initializer
                             MXNet.NN.DataIter.Class
