@@ -15,7 +15,11 @@ data Parameter a = ParameterI { _param_in :: NDArray a, _param_grad :: NDArray a
 
 -- | Session is all the 'Parameters' and a 'Context'
 -- type Session a = (M.HashMap String (Parameter a), Context)
-data Session a = Session { _sess_param :: !(M.HashMap String (Parameter a)), _sess_context :: !Context }
+data Session a = Session { 
+    _sess_param   :: !(M.HashMap String (Parameter a)), 
+    _sess_context :: !Context,
+    _sess_num_upd :: !Int 
+}
 makeLenses ''Session
 -- | TrainM is a 'StateT' monad
 type TrainM a m = ST.StateT (Session a) m

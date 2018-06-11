@@ -34,7 +34,7 @@ import Data.Maybe (isJust, fromJust, maybe)
 import Control.Monad (when, zipWithM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Control.Lens (traverseOf, use, (^.))
+import Control.Lens (traverseOf, use, (^.), (%=))
 
 import MXNet.NN.Types
 import MXNet.NN.Optimizer
@@ -67,7 +67,7 @@ initialize sym config = do
     (inp_with_shp, aux_with_shp) <- inferShape sym placeholder
     inp_args <- M.traverseWithKey (initI placeholder spec2 dinit) inp_with_shp
     aux_args <- M.traverseWithKey (initA dinit) aux_with_shp
-    return $ Session (inp_args `M.union` aux_args) cxt
+    return $ Session (inp_args `M.union` aux_args) cxt 0
   where
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
@@ -203,6 +203,7 @@ fitAndEval opt net datAndLbl metric = do
 updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args, DType dtype) 
                  => opt dtype args -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
+    sess_num_upd %= (+1)
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         case v of 
           ParameterI {} -> do 
