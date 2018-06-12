@@ -13,16 +13,21 @@ data Parameter a = ParameterI { _param_in :: NDArray a, _param_grad :: NDArray a
                  | ParameterA { _param_aux :: NDArray a }
     deriving Show
 
+data Statistics = Statistics {
+    _stat_num_upd :: !Int,
+    _stat_last_lr :: !Float
+}
+makeLenses ''Statistics
+
 -- | Session is all the 'Parameters' and a 'Context'
 -- type Session a = (M.HashMap String (Parameter a), Context)
 data Session a = Session { 
     _sess_param   :: !(M.HashMap String (Parameter a)), 
-    _sess_context :: !Context,
-    _sess_num_upd :: !Int 
+    _sess_context :: !Context
 }
 makeLenses ''Session
 -- | TrainM is a 'StateT' monad
-type TrainM a m = ST.StateT (Session a) m
+type TrainM a m = ST.StateT (Session a) (ST.StateT Statistics m)
 
 -- | For every symbol in the neural network, it can be placeholder or a variable.
 -- therefore, a Config is to specify the shape of the placeholder and the 

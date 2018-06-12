@@ -49,7 +49,7 @@ import MXNet.NN.LrScheduler
 
 -- | Execute the 'TrainM' monad
 train :: (DType a, Monad m) => Session a -> TrainM a m r -> m r
-train = flip ST.evalStateT
+train sess proc = ST.evalStateT (ST.evalStateT proc sess) (Statistics 0 0)
 
 -- | infer the shapes of input and auxiliary symbols in a symbolic neural network
 inferShape :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int], M.HashMap String [Int])
@@ -74,7 +74,7 @@ initialize sym config = do
     (inp_with_shp, aux_with_shp) <- inferShape sym placeholder
     inp_args <- M.traverseWithKey (initI placeholder spec2 dinit) inp_with_shp
     aux_args <- M.traverseWithKey (initA dinit) aux_with_shp
-    return $ Session (inp_args `M.union` aux_args) cxt 0
+    return $ Session (inp_args `M.union` aux_args) cxt
   where
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
@@ -205,18 +205,16 @@ fitAndEval opt net datAndLbl metric = do
          getOutputs exec
      updateParameters opt datAndLbl
      let labels = map (datAndLbl M.!) (metric ^. metric_labelname)
-     liftIO $ zipWithM_ (evaluate metric) preds labels
+     zipWithM_ (evaluate metric) preds labels
 
 updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args, DType dtype) 
                  => opt dtype args -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
-    nup <- use sess_num_upd
-    sess_num_upd += 1
     modifyT . traverseOf sess_param  $ M.traverseWithKey $ \ k v -> do
         case v of 
           ParameterI {} -> do 
             if (not $ M.member k blacklist)
-                then do new_in <- liftIO $ optimize opt nup k (_param_in v) (_param_grad v) 
+                then do new_in <- optimize opt k (_param_in v) (_param_grad v) 
                         -- must evaluate the new parameter to WHNF
                         -- otherwise, the old _param_in is retained.
                         -- if context is GPU, then OOM will soon 
@@ -224,6 +222,7 @@ updateParameters opt blacklist = do
                         return $! v {_param_in = new_in}
                 else return v
           ParameterA {} -> return v
+    ST.lift (stat_num_upd += 1)
 
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
 -- 
