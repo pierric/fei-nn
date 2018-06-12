@@ -21,8 +21,8 @@ data MultifactorScheduler = Multifactor Float Float [Int]
 instance LrScheduler MultifactorScheduler where
     getLR (Multifactor base factor steps) nup = base * factor ^ (index nup steps)
       where
-        index a bs = go a bs 0
-        go a [] n = n
+        index a bs = go a bs (0 :: Int)
+        go _ [] n = n
         go a (b:bs) n = if b > a then n else go a bs (n+1)
 
 data PolyScheduler = Poly Float Float Int

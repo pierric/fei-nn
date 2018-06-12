@@ -27,7 +27,6 @@ import Control.Monad (forM_, when)
 import qualified Data.Text.Lazy as T
 import qualified Data.GraphViz as GV
 import qualified Data.GraphViz.Attributes.Complete as GV
-import qualified Data.GraphViz.Attributes.Colors as GV
 import qualified Data.GraphViz.Types.Monadic as GVM
 import qualified Data.GraphViz.Types.Generalised as GVM
 import MXNet.NN.Utils.HMap (α)
@@ -37,7 +36,7 @@ import MXNet.NN.Utils.HMap (α)
 dotPlot :: DType a => Symbol a -> GV.GraphvizOutput -> FilePath -> IO ()
 dotPlot sym output filepath = do
     gr <- dotGraph sym
-    GV.addExtension (GV.runGraphvizCommand GV.Dot gr) output filepath
+    _  <- GV.addExtension (GV.runGraphvizCommand GV.Dot gr) output filepath
     return ()
 
 data JSNode = JSNode {
@@ -69,13 +68,13 @@ dotGraph sym = do
     js <- checked $ mxSymbolSaveToJSON (getHandle sym)
     auxnodes <- listAuxiliaries sym
     case eitherDecode $ pack js of
-      Left err -> throwM CannotDecodeJSONofSymbol
+      Left _ -> throwM CannotDecodeJSONofSymbol
       Right (JSGraph nodes) -> return $ GVM.digraph (GV.Num $ GV.Int 0) $ do
                                 let nodesWithIdx = (zip [0..] nodes)
                                     blacklist = map fst $ 
-                                                filter (\(id, node) -> elem (_node_name node) auxnodes || 
-                                                                       _like "-weight" node || _like "-bias"  node || 
-                                                                       _like "-beta"   node || _like "-gamma" node) 
+                                                filter (\(_, node) -> elem (_node_name node) auxnodes || 
+                                                                      _like "-weight" node || _like "-bias"  node || 
+                                                                      _like "-beta"   node || _like "-gamma" node) 
                                                        nodesWithIdx
                                 forM_ nodesWithIdx (mkNode blacklist)
                                 forM_ nodesWithIdx (mkEdge blacklist)
