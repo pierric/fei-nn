@@ -35,10 +35,10 @@ import qualified MXNet.Core.Base.Internal.TH.NDArray as MXI
 import qualified Data.HashMap.Strict as M
 import qualified Control.Monad.State.Strict as ST
 import Data.Maybe (isJust, fromJust, maybe)
-import Control.Monad (when, zipWithM_)
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Control.Lens (traverseOf, use, (^.), (+=))
+import Control.Lens (traverseOf, use, (+=))
 
 import MXNet.NN.Types
 import MXNet.NN.Optimizer
@@ -195,7 +195,7 @@ fit opt net datAndLbl = do
 -- | single step train. Must provide all the placeholders.
 --   After fitting, it also update the evaluation metric.
 fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt g, EvalMetricMethod mth)
-           => opt a g -> Symbol a -> M.HashMap String (NDArray a) -> Metric a mth -> TrainM a m ()
+           => opt a g -> Symbol a -> M.HashMap String (NDArray a) -> mth a -> TrainM a m ()
 fitAndEval opt net datAndLbl metric = do
      exec  <- bind net (M.map Just datAndLbl) True
      preds <- liftIO $ do 
@@ -204,8 +204,7 @@ fitAndEval opt net datAndLbl metric = do
          checked $ mxNDArrayWaitAll
          getOutputs exec
      updateParameters opt datAndLbl
-     let labels = map (datAndLbl M.!) (metric ^. metric_labelname)
-     zipWithM_ (evaluate metric) preds labels
+     evaluate metric datAndLbl preds
 
 updateParameters :: (MonadIO m, Optimizer opt, OptArgsCst opt args, DType dtype) 
                  => opt dtype args -> M.HashMap String any -> TrainM dtype m ()
