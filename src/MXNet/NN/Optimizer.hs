@@ -20,9 +20,9 @@ import MXNet.Core.Base.Internal.TH.NDArray as A
 import Data.IORef
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State.Class (MonadState)
-import Control.Lens (use)
+import Control.Lens (use, (.=))
 import MXNet.NN.LrScheduler (LrScheduler(..))
-import MXNet.NN.Types (Statistics, stat_num_upd)
+import MXNet.NN.Types (Statistics, stat_num_upd, stat_last_lr)
 
 -- | Constraint of using an optimizer
 type OptArgsCst opt args = (ShowKV args, MatchKVList args (OptArgsList opt))
@@ -57,6 +57,7 @@ instance Optimizer SGD_Opt where
     optimize (SGD_Opt (Base_Opt sch args)) _ weight gradient = do
         nup <- use stat_num_upd
         let lr = getLR sch nup
+        stat_last_lr .= lr
         liftIO $ A.NDArray <$> A.sgd_update (A.getHandle weight) (A.getHandle gradient) lr args
 
 -- | SGD with momentum optimizer
@@ -75,6 +76,7 @@ instance Optimizer SGD_Mom_Opt where
     optimize (SGD_Mom_Opt (Base_Opt sch args) emaref) symbol weight gradient = do
         nup <- use stat_num_upd
         let lr = getLR sch nup
+        stat_last_lr .= lr
         liftIO $ do
             ema <- readIORef emaref
             momentum <- case M.lookup symbol ema of
@@ -103,6 +105,7 @@ instance Optimizer ADAM_Opt where
     optimize (ADAM_Opt (Base_Opt sch args) emaref) symbol weight gradient = do
         nup <- use stat_num_upd
         let lr = getLR sch nup
+        stat_last_lr .= lr
         liftIO $ do
             ema <- readIORef emaref
             (moving_avg, moving_var) <- case M.lookup symbol ema of
