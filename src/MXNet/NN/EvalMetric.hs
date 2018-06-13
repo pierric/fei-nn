@@ -49,14 +49,13 @@ getBaseMetric metric = do
     return $ realToFrac s / fromIntegral n
 
 -- | Abstract Evaluation type class
-class DType (MetricDType metric) => EvalMetricMethod metric where
-    type MetricDType metric :: *
-    evaluate :: MonadIO m
-             => metric                                         -- evaluation metric
-             -> M.HashMap String (A.NDArray (MetricDType metric))  -- network bindings
-             -> [A.NDArray (MetricDType metric)]                   -- output of the network
-             -> TrainM (MetricDType metric) m ()
-    format   :: MonadIO m => metric -> TrainM (MetricDType metric) m String
+class EvalMetricMethod metric where
+    evaluate :: (MonadIO m, DType a)
+             => metric a                        -- evaluation metric
+             -> M.HashMap String (A.NDArray a)  -- network bindings
+             -> [A.NDArray a]                   -- output of the network
+             -> TrainM a m ()
+    format   :: (MonadIO m, DType a) => metric a -> TrainM a m String
 
 -- | Basic evluation - cross entropy 
 data CrossEntropy a = CrossEntropy (BaseMetric a)
@@ -64,8 +63,7 @@ data CrossEntropy a = CrossEntropy (BaseMetric a)
 metricCE :: (DType dtype, MonadIO m) => [String] -> m (CrossEntropy dtype)
 metricCE labels = CrossEntropy <$> newBaseMetric "CrossEntropy" labels
 
-instance DType a => EvalMetricMethod (CrossEntropy a) where
-    type MetricDType (CrossEntropy a) = a
+instance EvalMetricMethod CrossEntropy where
     -- | evaluate the log-loss. 
     -- preds is of shape (batch_size, num_category), each element along the second dimension gives the probability of the category.
     -- label is of shape (batch_size,), each element gives the category number.
@@ -104,24 +102,21 @@ data DumpLearningRate a = DumpLearningRate
 metricLR :: (DType dtype, MonadIO m) => m (DumpLearningRate dtype)
 metricLR = return DumpLearningRate
 
-instance DType a => EvalMetricMethod (DumpLearningRate a) where
-    type MetricDType (DumpLearningRate a) = a
+instance EvalMetricMethod DumpLearningRate where
     evaluate _ _ _ = return ()
     format _ = do
         lr <- lift $ use stat_last_lr
         return $ printf "<lr: %0.6f>" lr
 
-data ListOfMetric dt a where
-    MNil :: ListOfMetric dt '[]
-    (:+) :: (EvalMetricMethod a, MetricDType a ~ dt) => a -> ListOfMetric dt as -> ListOfMetric dt (a ': as)
+data ListOfMetric a dt where
+    MNil :: ListOfMetric '[] dt
+    (:+) :: (EvalMetricMethod a) => a dt -> ListOfMetric as dt -> ListOfMetric (a ': as) dt
 
-instance DType dt => EvalMetricMethod (ListOfMetric dt '[]) where
-    type MetricDType (ListOfMetric dt '[]) = dt
+instance EvalMetricMethod (ListOfMetric '[]) where
     evaluate _ _ _ = return ()
     format _ = return ""
 
-instance (DType dt, MetricDType a ~ MetricDType (ListOfMetric dt as), EvalMetricMethod a, EvalMetricMethod (ListOfMetric dt as)) => EvalMetricMethod (ListOfMetric dt (a ': as)) where
-    type MetricDType (ListOfMetric dt (a ': as)) = dt
+instance (EvalMetricMethod a, EvalMetricMethod (ListOfMetric as)) => EvalMetricMethod (ListOfMetric (a ': as)) where
     evaluate (a :+ as) bindings outputs = do
         evaluate a  bindings outputs
         evaluate as bindings outputs
@@ -134,10 +129,10 @@ infixr 9 :+
 infixr 9 #+
 infixr 9 ##
 
-(#+) :: (Monad m, EvalMetricMethod a, MetricDType a ~ dt) 
-     => m a -> m (ListOfMetric dt as) -> m (ListOfMetric dt (a ': as))
+(#+) :: (Monad m, EvalMetricMethod a, DType dt) 
+     => m (a dt) -> m (ListOfMetric as dt) -> m (ListOfMetric (a ': as) dt)
 (#+) = liftM2 (:+)
 
-(##) :: (Monad m, EvalMetricMethod a, EvalMetricMethod b, MetricDType a ~ MetricDType b) 
-     => m a -> m b -> m (ListOfMetric (MetricDType a) ('[a, b]))
+(##) :: (Monad m, EvalMetricMethod a, EvalMetricMethod b, DType dt) 
+     => m (a dt) -> m (b dt) -> m (ListOfMetric ('[a, b]) dt)
 (##) a b = a #+ b #+ (return MNil)

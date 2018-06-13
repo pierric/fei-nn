@@ -194,8 +194,8 @@ fit opt net datAndLbl = do
 
 -- | single step train. Must provide all the placeholders.
 --   After fitting, it also update the evaluation metric.
-fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt g, EvalMetricMethod mtr, MetricDType mtr ~ a)
-           => opt a g -> Symbol a -> M.HashMap String (NDArray a) -> mtr -> TrainM a m ()
+fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, OptArgsCst opt g, EvalMetricMethod mtr)
+           => opt a g -> Symbol a -> M.HashMap String (NDArray a) -> mtr a -> TrainM a m ()
 fitAndEval opt net datAndLbl metric = do
      exec  <- bind net (M.map Just datAndLbl) True
      preds <- liftIO $ do 
