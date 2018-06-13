@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-module MXNet.NN.Utils.HMap (hmap, α) where
+module MXNet.NN.Utils.HMap (hmap, α, M.nil) where
 
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote
