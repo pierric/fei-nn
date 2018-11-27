@@ -9,10 +9,6 @@ module MXNet.NN.Utils.GraphViz (
     GV.GraphvizOutput(..)
 ) where
 
-import MXNet.Core.Base.Internal (mxSymbolSaveToJSON, checked)
-import MXNet.Core.Base.Symbol (Symbol, getHandle, listAuxiliaries)
-import MXNet.Core.Base.HMap
-import MXNet.Core.Base.DType (DType)
 import Data.Aeson
 import Data.Aeson.Types
 import Data.ByteString.Lazy.Char8 (pack)
@@ -29,7 +25,8 @@ import qualified Data.GraphViz as GV
 import qualified Data.GraphViz.Attributes.Complete as GV
 import qualified Data.GraphViz.Types.Monadic as GVM
 import qualified Data.GraphViz.Types.Generalised as GVM
-import MXNet.NN.Utils.HMap (α)
+
+import MXNet.Base
 
 -- The program `dot` must be found in the PATH.
 
@@ -64,9 +61,9 @@ instance FromJSON JSGraph where
 -- plot_network
 -- https://github.com/apache/incubator-mxnet/blob/master/python/mxnet/visualization.py#L196
 dotGraph :: DType a => Symbol a -> IO (GVM.DotGraph Int)
-dotGraph sym = do
-    js <- checked $ mxSymbolSaveToJSON (getHandle sym)
-    auxnodes <- listAuxiliaries sym
+dotGraph (Symbol sym) = do
+    js <- mxSymbolSaveToJSON sym
+    auxnodes <- mxSymbolListAuxiliaryStates sym
     case eitherDecode $ pack js of
       Left _ -> throwM CannotDecodeJSONofSymbol
       Right (JSGraph nodes) -> return $ GVM.digraph (GV.Num $ GV.Int 0) $ do
@@ -76,62 +73,62 @@ dotGraph sym = do
                                                                       _like "-weight" node || _like "-bias"  node || 
                                                                       _like "-beta"   node || _like "-gamma" node) 
                                                        nodesWithIdx
-                                forM_ nodesWithIdx (mkNode blacklist)
-                                forM_ nodesWithIdx (mkEdge blacklist)
+                                forM_ nodesWithIdx (mkNode_ blacklist)
+                                forM_ nodesWithIdx (mkEdge_ blacklist)
   where
-    mkNode blacklist (id, JSNode{..}) = case _node_op of 
+    mkNode_ blacklist (nodeid, JSNode{..}) = case _node_op of 
         "null" -> 
-            when (not $ elem id blacklist) $ 
-              node id [α| label := _node_name, shape := GV.Ellipse, fillcolor := colors !! 0 |]
-        "Convolution" -> 
+            when (not $ elem nodeid blacklist) $ 
+            mkNode nodeid (#label := _node_name .& #shape := GV.Ellipse .& #fillcolor := colors !! 0 .& Nil)
+        "Convolution" -> do
             let attr = fromJust $ _node_attrs
                 krnl = formatTuple (fromJust $ M.lookup "kernel" attr)
                 strd = formatTuple (fromMaybe "1" $ M.lookup "stride" attr)
                 nflt = fromJust $ M.lookup "num_filter" attr
                 lbl = printf "Convolution\n%s/%s, %s" krnl strd nflt
-            in node id [α| label := lbl :: String, fillcolor := colors !! 1 |]
-        "FullyConnected" ->
+            mkNode nodeid (#label := lbl .& #fillcolor := colors !! 1 .& Nil)
+        "FullyConnected" -> do
             let attr = fromJust $ _node_attrs
                 hddn = fromJust $ M.lookup "num_hidden" attr
                 lbl = printf "FullyConnected\n%s" hddn
-            in node id [α| label := lbl :: String, fillcolor := colors !! 1 |]
+            mkNode nodeid (#label := lbl .& #fillcolor := colors !! 1 .& Nil)
         "BatchNorm" ->
-            node id [α| label := "batchNorm" :: String, fillcolor := colors !! 3 |]
-        "Activation" ->
+            mkNode nodeid (#label := "batchNorm" .& #fillcolor := colors !! 3 .& Nil)
+        "Activation" -> do
             let attr = fromJust $ _node_attrs
                 actt = fromJust $ M.lookup "act_type" attr
                 lbl = printf "Activation\n%s" actt
-            in node id [α| label := lbl :: String, fillcolor := colors !! 2 |]
-        "LeakyReLU" ->
+            mkNode nodeid (#label := lbl .& #fillcolor := colors !! 2 .& Nil)
+        "LeakyReLU" -> do
             let attr = fromJust $ _node_attrs
                 actt = fromJust $ M.lookup "act_type" attr
                 lbl = printf "LeakyReLU\n%s" actt
-            in node id [α| label := lbl :: String, fillcolor := colors !! 2 |]
-        "Pooling" ->
+            mkNode nodeid (#label := lbl .& #fillcolor := colors !! 2 .& Nil)
+        "Pooling" -> do
             let attr = fromJust $ _node_attrs
                 poot = fromJust $ M.lookup "pool_type" attr
                 krnl = formatTuple (fromJust $ M.lookup "kernel" attr)
                 strd = formatTuple (fromMaybe "1" $ M.lookup "stride" attr)
                 lbl = printf "Pooling\n%s, %s/%s" poot krnl strd
-            in node id [α| label := lbl :: String, fillcolor := colors !! 4 |]
+            mkNode nodeid (#label := lbl .& #fillcolor := colors !! 4 .& Nil)
         "Concat" -> 
-            node id [α| label := "Concat" :: String,  fillcolor := colors !! 5 |]
+            mkNode nodeid (#label := "Concat" .& #fillcolor := colors !! 5 .& Nil)
         "Flatten" ->
-            node id [α| label := "Flatten" :: String, fillcolor := colors !! 5 |]
+            mkNode nodeid (#label := "Flatten" .& #fillcolor := colors !! 5 .& Nil)
         "Reshape" ->
-            node id [α| label := "Reshape" :: String, fillcolor := colors !! 5 |]
+            mkNode nodeid (#label := "Reshape" .& #fillcolor := colors !! 5 .& Nil)
         "Softmax" ->
-            node id  [α| label := "Softmax" :: String, fillcolor := colors !! 6 |]
-        "Custom" ->
+            mkNode nodeid (#label := "Softmax" .& #fillcolor := colors !! 6 .& Nil)
+        "Custom" -> do
             let attr = fromJust $ _node_attrs
                 lbl = fromJust $ M.lookup "op_type" attr
-            in node id [α| label := lbl :: String, fillcolor := colors !! 7 |]
+            mkNode nodeid (#label := lbl .& #fillcolor := colors !! 7 .& Nil)
         _ ->
-            node id [α| label := _node_name, fillcolor := colors !! 7 |]
+            mkNode nodeid (#label := _node_name .& #fillcolor := colors !! 7 .& Nil)
 
-    mkEdge blacklist (tid, tnode) = do
+    mkEdge_ blacklist (tid, tnode) = do
         let op = _node_op tnode
-            name = _node_name tnode
+            -- name = _node_name tnode
         case op of 
             "null" -> return ()
             _ -> forM_ (_node_inputs tnode) $ \(sid:_) -> do
@@ -144,26 +141,28 @@ dotGraph sym = do
 
     _like sfx node = T.isSuffixOf sfx (T.pack $ _node_name node)
 
-node :: (MatchKVList kvs '["label"     ':= String, 
-                           "shape"     ':= GV.Shape, 
-                           "fixedsize" ':= Bool, 
-                           "fillcolor" ':= GV.Color, 
-                           "width"     ':= Float, 
-                           "height"    ':= Float, 
-                           "style"     ':= GV.Style],
-         QueryKV kvs)
-      => Int -> HMap kvs -> GVM.DotM Int ()
-node id args = GVM.node id attrs
+type instance ParameterList "graphviz_node" = 
+    '[ '("label",     'AttrOpt String),
+       '("shape",     'AttrOpt GV.Shape),
+       '("fixedsize", 'AttrOpt Bool),
+       '("fillcolor", 'AttrOpt GV.Color), 
+       '("width",     'AttrOpt Double), 
+       '("height",    'AttrOpt Double), 
+       '("style",     'AttrOpt GV.Style) ]
+
+mkNode :: (Fullfilled "graphviz_node" args)
+      => Int -> ArgsHMap "graphviz_node" args -> GVM.DotM Int ()
+mkNode nodeid args = GVM.node nodeid attrs
   where
-    shp = GV.Shape  $ fromMaybe GV.BoxShape $ query @"shape"     args
-    fxs = GV.FixedSize $ if fromMaybe True (query @"fixedsize" args)
+    shp = GV.Shape  $ fromMaybe GV.BoxShape $ args !? #shape
+    fxs = GV.FixedSize $ if fromMaybe True (args !? #fixedsize)
                          then GV.SetNodeSize 
                          else GV.GrowAsNeeded
-    wdt = GV.Width  $ fromMaybe 1.3         $ query @"width"     args
-    hgt = GV.Height $ fromMaybe 0.8034      $ query @"height"    args
-    sty = GV.style  $ fromMaybe GV.filled   $ query @"style"     args
-    mfc = maybeToList $ GV.FillColor . GV.toColorList . (:[]) <$> query @"fillcolor" args
-    lbl = maybeToList $ GV.textLabel . T.pack <$> query @"label" args
+    wdt = GV.Width  $ fromMaybe 1.3         $ args !? #width
+    hgt = GV.Height $ fromMaybe 0.8034      $ args !? #height
+    sty = GV.style  $ fromMaybe GV.filled   $ args !? #style
+    mfc = maybeToList $ GV.FillColor . GV.toColorList . (:[]) <$> (args !? #fillcolor)
+    lbl = maybeToList $ GV.textLabel . T.pack <$> (args !? #label)
     attrs = [shp, fxs, wdt, hgt, sty] ++  lbl ++ mfc
 
 color :: String -> Maybe GV.Color

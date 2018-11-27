@@ -1,133 +1,82 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module MXNet.NN.Layer (
   variable,
   convolution,
   fullyConnected,
-  PoolingMethod(..),
   pooling,
-  ActivationType(..),
   activation,
   softmaxoutput,
   batchnorm,
-  AsDType(..),
   cast,
   plus,
-  S.flatten,
-  S.identity,
+  flatten,
+  identity,
 ) where
 
-import MXNet.Core.Types.Internal
-import MXNet.Core.Base.HMap
-import qualified MXNet.Core.Base.Internal.TH.Symbol as S
-import qualified MXNet.Core.Base.Internal as I
-import MXNet.NN.Utils
+import MXNet.Base
+import qualified MXNet.Base.Operators.Symbol as S
 
 variable :: String -> IO SymbolHandle
-variable = I.checked . I.mxSymbolCreateVariable
+variable = mxSymbolCreateVariable
 
-convolution :: (MatchKVList kvs '["stride"     ':= String,
-                                  "dilate"     ':= String,
-                                  "pad"        ':= String,
-                                  "num_group"  ':= Int, 
-                                  "workspace"  ':= Int, 
-                                  "no_bias"    ':= Bool,
-                                  "cudnn_tune" ':= String, 
-                                  "cudnn_off"  ':= Bool, 
-                                  "layout"     ':= String]
-               ,ShowKV kvs, QueryKV kvs)
-            => String -> SymbolHandle -> [Int] -> Int -> HMap kvs -> IO SymbolHandle
-convolution name dat kernel_shape num_filter args = do
+convolution :: (HasOptArg "_Convolution(symbol)" args '["stride", "dilate", "pad", "num_group", "workspace", "layout", "cudnn_tune", "cudnn_off", "no_bias"]
+               ,HasReqArg "_Convolution(symbol)" args '["kernel", "num_filter", "data"])
+            => String -> ArgsHMap "_Convolution(symbol)" args -> IO SymbolHandle
+convolution name args = do
+    b <- variable (name ++ "-bias")
     w <- variable (name ++ "-weight")
-    if query @"no_bias" args == Just True
-      then 
-        S.convolution name dat w Nothing (formatShape kernel_shape) num_filter args
-      else do
-        b <- variable (name ++ "-bias")
-        S.convolution name dat w (Just b) (formatShape kernel_shape) num_filter args
+    S._Convolution name (#weight := w .& #bias := b .& args)
 
-fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool, 
-                                     "flatten" ':= Bool]
-                  ,ShowKV kvs, QueryKV kvs) 
-               => String -> SymbolHandle -> Int -> HMap kvs -> IO SymbolHandle
-fullyConnected name dat num_neuron args = do
-    w <- variable (name ++ "-weight")
-    if query @"no_bias" args == Just True
-      then 
-        S.fullyconnected name dat w Nothing num_neuron args
-      else do
-        b <- variable (name ++ "-bias")
-        S.fullyconnected name dat w (Just b) num_neuron args
+-- fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool, 
+--                                      "flatten" ':= Bool]
+--                   ,ShowKV kvs, QueryKV kvs) 
+--                => String -> SymbolHandle -> Int -> HMap kvs -> IO SymbolHandle
+fullyConnected :: (HasOptArg "_FullyConnected(symbol)" args '["flatten", "no_bias"]
+                  ,HasReqArg "_FullyConnected(symbol)" args '["data", "num_hidden"])
+              => String -> ArgsHMap "_FullyConnected(symbol)" args -> IO SymbolHandle
+fullyConnected name args = do
+  b <- variable (name ++ "-bias")
+  w <- variable (name ++ "-weight")
+  S._FullyConnected name (#weight := w .& #bias := b .& args)
 
-data PoolingMethod = PoolingMax | PoolingAvg | PoolingSum
+pooling :: (HasOptArg "_Pooling(symbol)" args '["stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
+           ,HasReqArg "_Pooling(symbol)" args '["data", "kernel", "pool_type"])
+        => String -> ArgsHMap "_Pooling(symbol)" args -> IO SymbolHandle
+pooling = S._Pooling
 
-poolingMethodToStr :: PoolingMethod -> String
-poolingMethodToStr PoolingMax = "max"
-poolingMethodToStr PoolingAvg = "avg"
-poolingMethodToStr PoolingSum = "sum"
+activation :: (HasReqArg "_Activation(symbol)" args '["data", "act_type"])
+        => String -> ArgsHMap "_Activation(symbol)" args -> IO SymbolHandle
+activation = S._Activation
 
-pooling :: (MatchKVList kvs '["global_pool" ':= Bool,
-                              "cudnn_off" ':= Bool,
-                              "pooling_convention" ':= String,
-                              "stride" ':= String,
-                              "pad" ':= String]
-           ,ShowKV kvs)
-        => String -> SymbolHandle -> [Int] -> PoolingMethod -> HMap kvs -> IO SymbolHandle
-pooling name input shape method args = S.pooling name input (formatShape shape) (poolingMethodToStr method) args
+softmaxoutput :: (HasOptArg "_SoftmaxOutput(symbol)" args '["out_grad", "smooth_alpha", "normalization", "preserve_shape", "multi_output", "use_ignore", "ignore_label", "grad_scale"]
+                 ,HasReqArg "_SoftmaxOutput(symbol)" args '["data", "label"])
+        => String -> ArgsHMap "_SoftmaxOutput(symbol)" args -> IO SymbolHandle
+softmaxoutput = S._SoftmaxOutput
 
-data ActivationType = Relu | Sigmoid | Tanh | SoftRelu
-
-activationTypeToStr :: ActivationType -> String
-activationTypeToStr Relu = "relu"
-activationTypeToStr Sigmoid = "sigmoid"
-activationTypeToStr Tanh = "tanh"
-activationTypeToStr SoftRelu = "softrelu"
-
-activation :: String -> SymbolHandle -> ActivationType -> IO SymbolHandle
-activation name input typ = S.activation name input (activationTypeToStr typ)
-
-softmaxoutput :: (MatchKVList kvs '["grad_scale" ':= Float, 
-                                    "ignore_label" ':= Float,
-                                    "multi_output" ':= Bool, 
-                                    "use_ignore" ':= Bool,
-                                    "preserve_shape" ':= Bool, 
-                                    "normalization" ':= String,
-                                    "out_grad" ':= Bool, 
-                                    "smooth_alpha" ':= Float],
-                  ShowKV kvs)
-               => String -> SymbolHandle -> SymbolHandle -> HMap kvs -> IO SymbolHandle
-softmaxoutput = S.softmaxoutput
-
-batchnorm :: (MatchKVList kvs '["eps" ':= Double,
-                                "momentum" ':= Float,
-                                "fix_gamma" ':= Bool,
-                                "use_global_stats" ':= Bool,
-                                "output_mean_var" ':= Bool,
-                                "axis" ':= Int,
-                                "cudnn_off" ':= Bool]
-             ,ShowKV kvs)
-          => String -> SymbolHandle -> HMap kvs -> IO SymbolHandle
-batchnorm name dat args = do
+batchnorm :: (HasOptArg "_BatchNorm(symbol)" args '["eps", "momentum", "fix_gamma", "use_global_stats", "output_mean_var", "axis", "cudnn_off"]
+             ,HasReqArg "_BatchNorm(symbol)" args '["data"])
+          => String -> ArgsHMap "_BatchNorm(symbol)" args -> IO SymbolHandle
+batchnorm name args = do
     gamma    <- variable (name ++ "-gamma")
     beta     <- variable (name ++ "-beta")
     mov_mean <- variable (name ++ "-moving-mean")
     mov_var  <- variable (name ++ "-moving-var")
-    S.batchnorm name dat gamma beta mov_mean mov_var args
+    S._BatchNorm name (#gamma := gamma .& #beta := beta .& #moving_mean := mov_mean .& #moving_var := mov_var .& args)
 
-data AsDType = AsFloat16 | AsFloat32 | AsFloat64 | AsUInt8 | AsInt32
-cast :: String -> SymbolHandle -> AsDType -> IO SymbolHandle
-cast name dat dtyp = S.cast name dat typ
-  where
-    typ = case dtyp of 
-            AsFloat16 -> "float16"
-            AsFloat32 -> "float32"
-            AsFloat64 -> "float64" 
-            AsUInt8   -> "uint8"
-            AsInt32   -> "int32"
+cast :: (HasReqArg "_Cast(symbol)" args '["data", "dtype"])
+    => String -> ArgsHMap "_Cast(symbol)" args -> IO SymbolHandle
+cast name args = S._Cast name args
 
-plus :: String -> SymbolHandle -> SymbolHandle -> IO SymbolHandle
-plus = S._Plus
+plus :: (HasReqArg "elemwise_add(symbol)" args '["lhs", "rhs"])
+    => String -> ArgsHMap "elemwise_add(symbol)" args -> IO SymbolHandle
+plus = S.elemwise_add
+
+flatten :: (HasReqArg "_Flatten(symbol)" args '["data"])
+    => String -> ArgsHMap "_Flatten(symbol)" args -> IO SymbolHandle
+flatten = S._Flatten
+
+identity :: (HasReqArg "_copy(symbol)" args '["data"])
+    => String -> ArgsHMap "_copy(symbol)" args -> IO SymbolHandle
+identity = S._copy

@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module MXNet.NN.Utils where
 
-import MXNet.Core.Base.DType
+import MXNet.Base.Types (Context(..))
 import Data.List (intersperse)
 import qualified Data.Text as T
 
@@ -11,7 +11,7 @@ formatShape shape = concat $ ["("] ++ intersperse "," (map show shape) ++ [")"]
 
 -- | format a context
 formatContext :: Context -> String
-formatContext Context{..} = getDeviceName deviceType ++ "(" ++ show deviceId ++ ")"
+formatContext Context{..} = getDeviceName _device_type ++ "(" ++ show _device_id ++ ")"
   where 
     getDeviceName 1 = "cpu"
     getDeviceName 2 = "gpu"

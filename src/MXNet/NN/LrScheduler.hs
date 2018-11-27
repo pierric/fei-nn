@@ -1,10 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 module MXNet.NN.LrScheduler where
 
-import MXNet.Core.Base.HMap
+import MXNet.Base.Spec.Operator
 import Data.Maybe (fromMaybe)
 
 class LrScheduler sch where
@@ -26,12 +25,18 @@ instance LrScheduler FactorScheduler where
         let lr = base * factor ^ (nup `div` step)
         in if lr < stop then stop else lr
 
-lrOfFactor :: (MatchKVList kvs '["base" ':= Float, "stop" ':= Float], QueryKV kvs)
-           => Float -> Int -> HMap kvs -> FactorScheduler
-lrOfFactor factor step args = Factor base factor step stop
+type instance ParameterList "lrOfFactor" =
+    '[ '("factor", 'AttrReq Float), '("step", 'AttrReq Int), 
+       '("base", 'AttrOpt Float), '("stop", 'AttrOpt Float)]
+       
+lrOfFactor :: Fullfilled "lrOfFactor" args 
+           => ArgsHMap "lrOfFactor" args -> FactorScheduler
+lrOfFactor args = Factor base factor step stop
   where 
-    base = fromMaybe 0.01 (query @"base" args :: Maybe Float)
-    stop = fromMaybe 1e-8 (query @"stop" args :: Maybe Float)
+    factor = args ! #factor
+    step   = args ! #step
+    base   = fromMaybe 0.01 (args !? #base)
+    stop   = fromMaybe 1e-8 (args !? #stop)
 
 data MultifactorScheduler = Multifactor Float Float [Int]
 instance LrScheduler MultifactorScheduler where
@@ -41,11 +46,16 @@ instance LrScheduler MultifactorScheduler where
         go _ [] n = n
         go a (b:bs) n = if b > a then n else go a bs (n+1)
 
-lrOfMultifactor :: (MatchKVList kvs '["base" ':= Float], QueryKV kvs)
-                => Float -> [Int] -> HMap kvs -> MultifactorScheduler
-lrOfMultifactor factor steps args = Multifactor base factor steps
+type instance ParameterList "lrOfMultifactor" =
+    '[ '("factor", 'AttrReq Float), '("steps", 'AttrReq [Int]), '("base", 'AttrOpt Float)]
+
+lrOfMultifactor :: Fullfilled "lrOfMultifactor" args
+                => ArgsHMap "lrOfMultifactor" args -> MultifactorScheduler
+lrOfMultifactor args = Multifactor base factor steps
   where 
-    base = fromMaybe 0.01 (query @"base" args :: Maybe Float)
+    factor = args ! #factor
+    steps  = args ! #steps
+    base = fromMaybe 0.01 (args !? #base)
 
 data PolyScheduler = Poly Float Float Int
 instance LrScheduler PolyScheduler where
@@ -54,9 +64,13 @@ instance LrScheduler PolyScheduler where
           then base * (1 - fromIntegral nup / fromIntegral maxnup) ** power
           else 0
 
-lrOfPoly :: (MatchKVList kvs '["base" ':= Float, "power" ':= Float], QueryKV kvs)
-           => Int -> HMap kvs -> PolyScheduler
-lrOfPoly maxnup args = Poly base power maxnup
+type instance ParameterList "lrOfPoly" =
+    '[ '("maxnup", 'AttrReq Int), '("power", 'AttrReq Float), '("base", 'AttrOpt Float)]
+
+lrOfPoly :: Fullfilled "lrOfPoly" args
+           => ArgsHMap "lrOfPoly" args -> PolyScheduler
+lrOfPoly args = Poly base power maxnup
   where 
-    base = fromMaybe 0.01 (query @"base"  args :: Maybe Float)
-    power= fromMaybe 2    (query @"power" args :: Maybe Float)
+    maxnup = args ! #maxnup
+    base   = fromMaybe 0.01 (args !? #base)
+    power  = fromMaybe 2    (args !? #power)

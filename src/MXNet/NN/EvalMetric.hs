@@ -14,9 +14,9 @@ import Text.Printf (printf)
 import qualified Data.Vector.Storable as SV
 import Control.Lens (makeLenses, use, (^.))
 import Control.Monad.State.Strict (lift)
-import MXNet.Core.Base (DType, context, ndshape, nil)
-import qualified MXNet.Core.Base.NDArray as A
-import qualified MXNet.Core.Base.Internal.TH.NDArray as A
+
+import MXNet.Base
+import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 
 -- | Metric data
@@ -52,8 +52,8 @@ getBaseMetric metric = do
 class EvalMetricMethod metric where
     evaluate :: (MonadIO m, DType a)
              => metric a                        -- evaluation metric
-             -> M.HashMap String (A.NDArray a)  -- network bindings
-             -> [A.NDArray a]                   -- output of the network
+             -> M.HashMap String (NDArray a)  -- network bindings
+             -> [NDArray a]                   -- output of the network
              -> TrainM a m ()
     format   :: (MonadIO m, DType a) => metric a -> TrainM a m String
 
@@ -63,6 +63,10 @@ data CrossEntropy a = CrossEntropy (BaseMetric a)
 metricCE :: (DType dtype, MonadIO m) => [String] -> m (CrossEntropy dtype)
 metricCE labels = CrossEntropy <$> newBaseMetric "CrossEntropy" labels
 
+
+copyTo :: DType a => NDArray a -> NDArray a -> IO ()
+copyTo (NDArray dst) (NDArray src) = A._copy_upd [dst] (#data := src .& Nil)
+
 instance EvalMetricMethod CrossEntropy where
     -- | evaluate the log-loss. 
     -- preds is of shape (batch_size, num_category), each element along the second dimension gives the probability of the category.
@@ -71,25 +75,25 @@ instance EvalMetricMethod CrossEntropy where
         let labels = map (bindings M.!) (metric ^. metric_labelname)
         liftIO $ zipWithM_ each outputs labels 
       where
-        each preds label = do
-            (n1, shp1) <- A.ndshape preds
-            (n2, shp2) <- A.ndshape label
-            when (n1 /= 2 || n2 /= 1 || head shp1 /= head shp2) (throwM $ MismatchedShapeInEval shp1 shp2)
+        each preds label@(NDArray labelHandle) = do
+            shp1 <- ndshape preds
+            shp2 <- ndshape label
+            when (length shp1 /= 2 || length shp2 /= 1 || head shp1 /= head shp2) (throwM $ MismatchedShapeInEval shp1 shp2)
             -- before call pick, we have to make sure preds and label 
             -- are in the same context
-            preds_may_copy <- do
+            NDArray preds_may_copy <- do
                 c1 <- context preds
                 c2 <- context label
                 if c1 == c2 
                     then return preds
                     else do
-                        (_, preds_shap) <- ndshape preds
-                        preds_copy <- A.makeEmptyNDArray preds_shap c2 False
-                        A._copyto' (A.getHandle preds) [A.getHandle preds_copy] :: IO ()
+                        preds_shap <- ndshape preds
+                        preds_copy <- makeEmptyNDArray preds_shap c2
+                        copyTo preds_copy preds
                         return preds_copy
-            predprj <- A.pick (A.getHandle preds_may_copy) (A.getHandle label) nil
-            predlog <- A.log predprj
-            loss    <- A.sum predlog nil >>= A.items . A.NDArray
+            [predprj] <- A.pick (#data := preds_may_copy .& #index := labelHandle .& Nil)
+            [predlog] <- A.log (#data := predprj .& Nil)
+            loss      <- A.sum (#data := predlog .& Nil) >>= toVector . NDArray . head
             modifyIORef (_metric_sum metric) (+ (negate $ loss SV.! 0))
             modifyIORef (_metric_instance metric) (+ head shp1)
     format (CrossEntropy metric) = liftIO $ do

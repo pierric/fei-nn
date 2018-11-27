@@ -1,24 +1,21 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE OverloadedLabels #-}
 module Main where
 
-import MXNet.Core.Base (contextCPU, contextGPU, mxListAllOpNames)
-import MXNet.Core.Base.HMap
-import qualified MXNet.Core.Base.NDArray as A
-import qualified MXNet.Core.Base.Internal.TH.NDArray as A
-import qualified MXNet.Core.Base.Symbol as S
-import qualified Data.HashMap.Strict as M
 import Control.Monad (forM_, void)
 import qualified Data.Vector.Storable as SV
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 import System.IO (hFlush, stdout)
+import qualified Data.HashMap.Strict as M
+
+import MXNet.Base hiding (zeros)
+import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN
 import MXNet.NN.DataIter.Class
-import MXNet.NN.Utils.HMap
+import qualified MXNet.NN.Utils.GraphViz as GV
 
 import DatasetVector
 
@@ -44,30 +41,30 @@ neural = do
     x  <- variable "x"
     y  <- variable "y"
 
-    v1 <- convolution "conv1" x [5,5] 20 nil
-    a1 <- activation "conv1-a" v1 Tanh
-    p1 <- pooling "conv1-p" a1 [2,2] PoolingMax nil
+    v1 <- convolution "conv1"  (#data := x  .& #kernel := [5,5] .& #num_filter := 20 .& Nil)
+    a1 <- activation "conv1-a" (#data := v1 .& #act_type := #tanh .& Nil)
+    p1 <- pooling "conv1-p"    (#data := a1 .& #kernel := [2,2] .& #pool_type := #max .& Nil)
 
-    v2 <- convolution "conv2" p1 [5,5] 50 nil
-    a2 <- activation "conv2-a" v2 Tanh
-    p2 <- pooling "conv2-p" a2 [2,2] PoolingMax nil
+    v2 <- convolution "conv2"  (#data := p1 .& #kernel := [5,5] .& #num_filter := 50 .& Nil)
+    a2 <- activation "conv2-a" (#data := v2 .& #act_type := #tanh .& Nil)
+    p2 <- pooling "conv2-p"    (#data := a2 .& #kernel := [2,2] .& #pool_type := #max .& Nil)
 
-    fl <- flatten "flatten" p2
+    fl <- flatten "flatten"    (#data := p2 .& Nil)
 
-    v3 <- fullyConnected "fc1" fl 500 nil
-    a3 <- activation "fc1-a" v3 Tanh
+    v3 <- fullyConnected "fc1" (#data := fl .& #num_hidden := 500 .& Nil)
+    a3 <- activation "fc1-a"   (#data := v3 .& #act_type := #tanh .& Nil)
 
-    v4 <- fullyConnected "fc2" a3 10 nil
-    a4 <- softmaxoutput "softmax" v4 y nil
-    return $ S.Symbol a4
+    v4 <- fullyConnected "fc2" (#data := a3 .& #num_hidden := 10  .& Nil)
+    a4 <- softmaxoutput "softmax" (#data := v4 .& #label := y .& Nil)
+    return $ Symbol a4
 
 range :: Int -> [Int]
 range = enumFromTo 1
 
 default_initializer :: Initializer Float
-default_initializer shp@[_]   = zeros shp
-default_initializer shp@[_,_] = xavier 2.0 XavierGaussian XavierIn shp
-default_initializer shp = normal 0.1 shp
+default_initializer name shp@[_]   = zeros name shp
+default_initializer name shp@[_,_] = xavier 2.0 XavierGaussian XavierIn name shp
+default_initializer name shp = normal 0.1 name shp
 
 main :: IO ()
 main = do
@@ -75,13 +72,14 @@ main = do
     -- i.e. MXNet operators are registered in the NNVM
     _    <- mxListAllOpNames
     net  <- neural
+    -- GV.dotPlot net GV.Png "lenet"
     sess <- initialize net $ Config { 
                 _cfg_placeholders = M.singleton "x" [1,1,28,28],
                 _cfg_initializers = M.empty,
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
             }
-    optimizer <- makeOptimizer (SGD'Mom $ Const 0.0002) [α| momentum := 0.9 :: Float, wd := 0.0001 :: Float |]
+    optimizer <- makeOptimizer SGD'Mom (Const 0.0002) (#momentum := 0.9 .& #wd := 0.0001 .& Nil)
 
     runResourceT $ train sess $ do 
 
@@ -105,8 +103,8 @@ main = do
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
                 hFlush stdout
             [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
-            ind1 <- liftIO $ A.items y
-            ind2 <- liftIO $ argmax y' >>= A.items
+            ind1 <- liftIO $ toVector y
+            ind2 <- liftIO $ argmax y' >>= toVector
             return (ind1, ind2)
         liftIO $ putStr "\r\ESC[K"
 
@@ -119,4 +117,4 @@ main = do
   
   where
     argmax :: ArrayF -> IO ArrayF
-    argmax ys = A.NDArray <$> A.argmax (A.getHandle ys) [α| axis := 1::Int |]
+    argmax (NDArray ys) = NDArray . head <$> A.argmax (#data := ys .& #axis := Just 1 .& Nil)

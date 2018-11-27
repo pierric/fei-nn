@@ -6,12 +6,13 @@ import qualified Data.HashMap.Strict as M
 import qualified Control.Monad.State.Strict as ST
 import Control.Exception.Base (Exception)
 import Data.Typeable (Typeable)
-import MXNet.Core.Base hiding (bind, context, (^.))
+
+import MXNet.Base
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
-data Parameter a = ParameterI { _param_in :: NDArray a, _param_grad :: NDArray a }
+data Parameter a = ParameterI { _param_in :: NDArray a, _param_grad :: Maybe (NDArray a) }
                  | ParameterA { _param_aux :: NDArray a }
-    deriving Show
+    -- deriving Show
 
 data Statistics = Statistics {
     _stat_num_upd :: !Int,
@@ -19,7 +20,7 @@ data Statistics = Statistics {
 }
 makeLenses ''Statistics
 
--- | Session is all the 'Parameters' and a 'Context'
+-- | Session is all the 'Parameters' and a 'Device'
 -- type Session a = (M.HashMap String (Parameter a), Context)
 data Session a = Session { 
     _sess_param   :: !(M.HashMap String (Parameter a)), 
@@ -56,5 +57,6 @@ type Initializer a = String -> [Int] -> Context -> IO (NDArray a)
 data Exc = MismatchedShapeOfSym String [Int] [Int]
          | MismatchedShapeInEval [Int] [Int]
          | InvalidArgument String
+         | InferredShapeInComplete
     deriving (Show, Typeable)
 instance Exception Exc

@@ -1,6 +1,6 @@
 module DatasetVector where
 
-import MXNet.Core.Base
+import MXNet.Base (Symbol, NDArray, makeNDArray, contextCPU)
 import Data.Typeable
 import Control.Monad.Trans.Resource (MonadResource(..), MonadThrow(..))
 import Control.Monad.IO.Class (liftIO)
