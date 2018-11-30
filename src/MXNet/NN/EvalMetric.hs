@@ -65,7 +65,7 @@ metricCE labels = CrossEntropy <$> newBaseMetric "CrossEntropy" labels
 
 
 copyTo :: DType a => NDArray a -> NDArray a -> IO ()
-copyTo (NDArray dst) (NDArray src) = A._copy_upd [dst] (#data := src .& Nil)
+copyTo (NDArray dst) (NDArray src) = A._copyto_upd [dst] (#data := src .& Nil)
 
 instance EvalMetricMethod CrossEntropy where
     -- | evaluate the log-loss. 
