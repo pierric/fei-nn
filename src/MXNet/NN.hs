@@ -125,11 +125,12 @@ bind net dat train_ = do
     exec_handle <- liftIO $ do
         names <- mxSymbolListArguments (unSymbol net)
         -- the parameters to bind should be arranged in the same order as the names
-        let arg_in  = map (unNDArray . _param_in) $ map (args M.!) names
+        let num_args = length names
+            arg_in  = map (unNDArray . _param_in) $ map (args M.!) names
             arg_gr  = if train_ 
                         then map (fmap unNDArray . _param_grad) $ map (args M.!) names
-                        else replicate (M.size args) Nothing
-            arg_gr_req = replicate (M.size args) 1
+                        else replicate num_args Nothing
+            arg_gr_req = replicate num_args (if train_ then 1 else 0)
 
         auxnames <- mxSymbolListAuxiliaryStates (unSymbol net)
         let aux_arg_aux = map (unNDArray . _param_aux) $ map (args M.!) auxnames
