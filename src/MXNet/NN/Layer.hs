@@ -21,42 +21,43 @@ import qualified MXNet.Base.Operators.Symbol as S
 variable :: String -> IO SymbolHandle
 variable = mxSymbolCreateVariable
 
-convolution :: (HasOptArg "_Convolution(symbol)" args '["stride", "dilate", "pad", "num_group", "workspace", "layout", "cudnn_tune", "cudnn_off", "no_bias"]
-               ,HasReqArg "_Convolution(symbol)" args '["kernel", "num_filter", "data"])
+convolution :: (HasArgs "_Convolution(symbol)" args '["kernel", "num_filter", "data", "stride", "dilate", "pad", "num_group", "workspace", "layout", "cudnn_tune", "cudnn_off", "no_bias"]
+               ,WithoutArgs "_Convolution(symbol)" args '["bias", "weight"])
             => String -> ArgsHMap "_Convolution(symbol)" args -> IO SymbolHandle
 convolution name args = do
     b <- variable (name ++ "-bias")
     w <- variable (name ++ "-weight")
-    S._Convolution name (#weight := w .& #bias := b .& args)
+    if args !? #no_bias == Just True 
+      then
+        S._Convolution name (#weight := w .& args)
+      else
+        S._Convolution name (#bias := b .& #weight := w .& args)
 
--- fullyConnected :: (MatchKVList kvs '["no_bias" ':= Bool, 
---                                      "flatten" ':= Bool]
---                   ,ShowKV kvs, QueryKV kvs) 
---                => String -> SymbolHandle -> Int -> HMap kvs -> IO SymbolHandle
-fullyConnected :: (HasOptArg "_FullyConnected(symbol)" args '["flatten", "no_bias"]
-                  ,HasReqArg "_FullyConnected(symbol)" args '["data", "num_hidden"])
+fullyConnected :: (HasArgs "_FullyConnected(symbol)" args '["flatten", "no_bias", "data", "num_hidden"]
+                  ,WithoutArgs "_FullyConnected(symbol)" args '["bias", "weight"])
               => String -> ArgsHMap "_FullyConnected(symbol)" args -> IO SymbolHandle
 fullyConnected name args = do
   b <- variable (name ++ "-bias")
   w <- variable (name ++ "-weight")
-  S._FullyConnected name (#weight := w .& #bias := b .& args)
+  if args !? #no_bias == Just True 
+    then
+      S._FullyConnected name (#weight := w .& args)
+    else
+      S._FullyConnected name (#bias := b .& #weight := w .& args)
 
-pooling :: (HasOptArg "_Pooling(symbol)" args '["stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
-           ,HasReqArg "_Pooling(symbol)" args '["data", "kernel", "pool_type"])
+pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
         => String -> ArgsHMap "_Pooling(symbol)" args -> IO SymbolHandle
 pooling = S._Pooling
 
-activation :: (HasReqArg "_Activation(symbol)" args '["data", "act_type"])
+activation :: HasArgs "_Activation(symbol)" args '["data", "act_type"]
         => String -> ArgsHMap "_Activation(symbol)" args -> IO SymbolHandle
 activation = S._Activation
 
-softmaxoutput :: (HasOptArg "_SoftmaxOutput(symbol)" args '["out_grad", "smooth_alpha", "normalization", "preserve_shape", "multi_output", "use_ignore", "ignore_label", "grad_scale"]
-                 ,HasReqArg "_SoftmaxOutput(symbol)" args '["data", "label"])
+softmaxoutput :: HasArgs "_SoftmaxOutput(symbol)" args '["data", "label", "out_grad", "smooth_alpha", "normalization", "preserve_shape", "multi_output", "use_ignore", "ignore_label", "grad_scale"]
         => String -> ArgsHMap "_SoftmaxOutput(symbol)" args -> IO SymbolHandle
 softmaxoutput = S._SoftmaxOutput
 
-batchnorm :: (HasOptArg "_BatchNorm(symbol)" args '["eps", "momentum", "fix_gamma", "use_global_stats", "output_mean_var", "axis", "cudnn_off"]
-             ,HasReqArg "_BatchNorm(symbol)" args '["data"])
+batchnorm :: HasArgs "_BatchNorm(symbol)" args '["data", "eps", "momentum", "fix_gamma", "use_global_stats", "output_mean_var", "axis", "cudnn_off"]
           => String -> ArgsHMap "_BatchNorm(symbol)" args -> IO SymbolHandle
 batchnorm name args = do
     gamma    <- variable (name ++ "-gamma")
@@ -65,18 +66,18 @@ batchnorm name args = do
     mov_var  <- variable (name ++ "-moving-var")
     S._BatchNorm name (#gamma := gamma .& #beta := beta .& #moving_mean := mov_mean .& #moving_var := mov_var .& args)
 
-cast :: (HasReqArg "_Cast(symbol)" args '["data", "dtype"])
+cast :: HasArgs "_Cast(symbol)" args '["data", "dtype"]
     => String -> ArgsHMap "_Cast(symbol)" args -> IO SymbolHandle
 cast name args = S._Cast name args
 
-plus :: (HasReqArg "elemwise_add(symbol)" args '["lhs", "rhs"])
+plus :: HasArgs "elemwise_add(symbol)" args '["lhs", "rhs"]
     => String -> ArgsHMap "elemwise_add(symbol)" args -> IO SymbolHandle
 plus = S.elemwise_add
 
-flatten :: (HasReqArg "_Flatten(symbol)" args '["data"])
+flatten :: HasArgs "_Flatten(symbol)" args '["data"]
     => String -> ArgsHMap "_Flatten(symbol)" args -> IO SymbolHandle
 flatten = S._Flatten
 
-identity :: (HasReqArg "_copy(symbol)" args '["data"])
+identity :: HasArgs "_copy(symbol)" args '["data"]
     => String -> ArgsHMap "_copy(symbol)" args -> IO SymbolHandle
 identity = S._copy
