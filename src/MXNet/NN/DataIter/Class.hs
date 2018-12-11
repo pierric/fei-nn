@@ -31,6 +31,8 @@ class Dataset (d :: * -> *) where
         n <- sizeD dat
         forEachD ((fromListD (replicate n n) `zipD` fromListD [1..n]) `zipD` dat) proc
 
+    foldD :: (DatasetConstraint d m, Monad m) => d e -> a -> (a -> e -> m a) -> m a
+
 type instance DatasetConstraint [] m = ()
 instance Dataset [] where
     fromListD = id
