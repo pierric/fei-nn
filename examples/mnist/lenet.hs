@@ -89,7 +89,7 @@ main = do
         liftIO $ putStrLn $ "[Train] "
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            metric <- metricCE ["y"]
+            metric <- mCE ["y"]
             void $ forEachD_ni trainingData $ \((t,i), (x, y)) -> do
                 eval <- format metric
                 liftIO $ putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
