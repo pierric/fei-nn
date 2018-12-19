@@ -20,33 +20,33 @@ import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 
 -- | Metric data
-data BaseMetric dytpe = BaseMetric {
+data BaseMetric a = BaseMetric {
     _metric_name :: String,
     _metric_labelname :: [String],
     _metric_instance :: IORef Int,
-    _metric_sum :: IORef dytpe
+    _metric_sum :: IORef a
 }
 makeLenses ''BaseMetric
 
 -- | create a new metric data
-newBaseMetric :: (DType dtype, MonadIO m) => String -> [String] -> m (BaseMetric dtype)
+newBaseMetric :: (Num a, MonadIO m) => String -> [String] -> m (BaseMetric a)
 newBaseMetric name labels = do
     a <- liftIO $ newIORef 0
     b <- liftIO $ newIORef 0
     return $ BaseMetric name labels a b
 
 -- | reset all information
-resetBaseMetric :: (DType dtype, MonadIO m) => BaseMetric dtype -> m ()
+resetBaseMetric :: (Num a, MonadIO m) => BaseMetric a -> m ()
 resetBaseMetric metric = liftIO $ do
     writeIORef (_metric_sum metric) 0
     writeIORef (_metric_instance metric) 0
 
 -- -- | get the metric
-getBaseMetric :: (DType dtype, MonadIO m) => BaseMetric dtype -> m Float
+getBaseMetric :: MonadIO m => BaseMetric a -> m (a, Int)
 getBaseMetric metric = do
     s <- liftIO $ readIORef (_metric_sum metric)
     n <- liftIO $ readIORef (_metric_instance metric)
-    return $ realToFrac s / fromIntegral n
+    return (s, n)
 
 -- | Abstract Evaluation type class
 class EvalMetricMethod metric where
@@ -57,11 +57,36 @@ class EvalMetricMethod metric where
              -> TrainM a m ()
     format   :: (MonadIO m, DType a) => metric a -> TrainM a m String
 
--- | Basic evluation - cross entropy 
+
+-- | Basic evaluation - accuracy
+data Accuracy a = Accuracy (BaseMetric Int)
+
+mACC :: (DType dtype, MonadIO m) => [String] -> m (Accuracy dtype)
+mACC labels = Accuracy <$> newBaseMetric "Accuracy" labels
+
+instance EvalMetricMethod Accuracy where
+    evaluate (Accuracy metric) bindings outputs = do
+        let labels = map (bindings M.!) (metric ^. metric_labelname)
+        liftIO $ zipWithM_ each outputs labels 
+      where
+        each preds@(NDArray preds_hdl) label = do
+            [pred_cat_hdl] <- A.argmax (#data := preds_hdl .& #axis := Just 1 .& Nil)
+            pred_cat <- toVector (NDArray pred_cat_hdl)
+            real_cat <- toVector label
+
+            batch_size:_ <- ndshape preds
+            let correct = SV.length $ SV.filter id $ SV.zipWith (==) pred_cat real_cat
+            modifyIORef (_metric_sum metric) (+ correct)
+            modifyIORef (_metric_instance metric) (+ batch_size)
+    format (Accuracy metric) = liftIO $ do
+        (s, n) <- getBaseMetric metric 
+        return $ printf "<%s: %0.2f>" (_metric_name metric) (100 * fromIntegral s / fromIntegral n :: Float)
+
+-- | Basic evaluation - cross entropy 
 data CrossEntropy a = CrossEntropy (BaseMetric a)
 
-metricCE :: (DType dtype, MonadIO m) => [String] -> m (CrossEntropy dtype)
-metricCE labels = CrossEntropy <$> newBaseMetric "CrossEntropy" labels
+mCE :: (DType dtype, MonadIO m) => [String] -> m (CrossEntropy dtype)
+mCE labels = CrossEntropy <$> newBaseMetric "CrossEntropy" labels
 
 
 copyTo :: DType a => NDArray a -> NDArray a -> IO ()
@@ -97,14 +122,14 @@ instance EvalMetricMethod CrossEntropy where
             modifyIORef (_metric_sum metric) (+ (negate $ loss SV.! 0))
             modifyIORef (_metric_instance metric) (+ head shp1)
     format (CrossEntropy metric) = liftIO $ do
-        e <- getBaseMetric metric 
-        return $ printf "<%s: %0.3f>" (_metric_name metric) e
+        (s, n) <- getBaseMetric metric 
+        return $ printf "<%s: %0.3f>" (_metric_name metric) (realToFrac s / fromIntegral n :: Float)
 
 -- | Learning rate
 data DumpLearningRate a = DumpLearningRate
 
-metricLR :: (DType dtype, MonadIO m) => m (DumpLearningRate dtype)
-metricLR = return DumpLearningRate
+mLR :: (DType dtype, MonadIO m) => m (DumpLearningRate dtype)
+mLR = return DumpLearningRate
 
 instance EvalMetricMethod DumpLearningRate where
     evaluate _ _ _ = return ()
