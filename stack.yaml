@@ -7,7 +7,10 @@ extra-deps:
 - ../mxnet-hs/base
 - ../mxnet-hs/operators
 - ../tuple-ops
-- ../type-combinators
+- git: https://github.com/kylcarte/type-combinators.git
+  commit: 071942730b6bb34990d37e1a25236382cf0dcbc6
+- git: https://github.com/pierric/haskell-src-exts.git
+  commit: f75a5dbe2ec9fbc67df0936333e0665b033f9e22
 - c2hs-extra-0.1.0.1
 - streaming-utils-0.1.4.7
 - graphviz-2999.20.0.2

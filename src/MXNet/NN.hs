@@ -31,10 +31,12 @@ import qualified MXNet.Base.Operators.NDArray as A
 import qualified Data.HashMap.Strict as M
 import qualified Control.Monad.State.Strict as ST
 import Data.Maybe (isJust, fromJust, maybe)
+import Data.Foldable (forM_)
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Lens (traverseOf, use, (+=))
+import System.Mem
 
 import MXNet.NN.Types
 import MXNet.NN.Optimizer
@@ -179,28 +181,28 @@ fit opt net datAndLbl = do
     liftIO $ do 
         mxExecutorForward (unExecutor exec) True
         mxExecutorBackward (unExecutor exec) []
-        -- forward/backward are asynchronised operation in mxnet, in a
-        -- sense that only opcodes are pushed onto an internal execution 
-        -- stack, and there is a executor running in a separate thread.
-        -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
-        -- called so fast that too many opcodes and data on the stack, 
-        -- as described in issue #1
-        mxNDArrayWaitAll
+    -- forward/backward are asynchronised operation in mxnet, in a
+    -- sense that only opcodes are pushed onto an internal execution 
+    -- stack, and there is a executor running in a separate thread.
+    -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
+    -- called so fast that too many opcodes and data on the stack, 
+    -- as described in issue #1
     updateParameters opt datAndLbl
+    liftIO performGC
 
 -- | single step train. Must provide all the placeholders.
 --   After fitting, it also update the evaluation metric.
 fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, EvalMetricMethod mtr)
            => opt a -> Symbol a -> M.HashMap String (NDArray a) -> mtr a -> TrainM a m ()
 fitAndEval opt net datAndLbl metric = do
-     Executor exec  <- bind net (M.map Just datAndLbl) True
-     preds <- liftIO $ do 
-         mxExecutorForward exec True
-         mxExecutorBackward exec []
-         mxNDArrayWaitAll
-         map NDArray <$> mxExecutorOutputs exec
-     updateParameters opt datAndLbl
-     evaluate metric datAndLbl preds
+    Executor exec  <- bind net (M.map Just datAndLbl) True
+    liftIO $ do 
+        mxExecutorForward exec True
+        mxExecutorBackward exec []
+    updateParameters opt datAndLbl
+    preds <- liftIO $ map NDArray <$> mxExecutorOutputs exec
+    evaluate metric datAndLbl preds
+    liftIO performGC
 
 updateParameters :: (MonadIO m, Optimizer opt, DType dtype) 
                  => opt dtype -> M.HashMap String any -> TrainM dtype m ()
@@ -210,15 +212,12 @@ updateParameters opt blacklist = do
           ParameterI {} -> do 
             case (M.member k blacklist, _param_grad v) of
               (False, Just grad) -> do
-                        new_in <- optimize opt k (_param_in v) grad
-                        -- must evaluate the new parameter to WHNF
-                        -- otherwise, the old _param_in is retained.
-                        -- if context is GPU, then OOM will soon 
-                        -- occur, as described in issue #2
-                        return $! v {_param_in = new_in}
+                        optimize opt k (_param_in v) grad
+                        return v
               _ -> return v
           ParameterA {} -> return v
     ST.lift (stat_num_upd += 1)
+    waitParams
 
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
 -- 
@@ -226,11 +225,25 @@ updateParameters opt blacklist = do
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly net dat = do
     Executor exec <- bind net dat False
-    liftIO $ do
-        mxExecutorForward exec False
-        -- for the same reason in 'fit'.
-        mxNDArrayWaitAll
-        map NDArray <$> mxExecutorOutputs exec
+    liftIO $ mxExecutorForward exec False
+    liftIO $ map NDArray <$> mxExecutorOutputs exec
+
+waitParams :: (MonadIO m, DType a) => TrainM a m ()
+waitParams = do
+    params <- use sess_param
+    forM_ params (\param -> 
+        case param of 
+            ParameterA arr1 -> 
+                wait arr1
+            ParameterI arr1 Nothing -> 
+                wait arr1
+            ParameterI arr1 (Just arr2) -> do
+                wait arr1
+                wait arr2
+        )
+
+wait :: (MonadIO m, DType a) => NDArray a -> TrainM a m ()
+wait (NDArray hdl) = liftIO $ mxNDArrayWaitToRead hdl
 
 getContext :: Monad m => TrainM a m Context
 getContext = use sess_context

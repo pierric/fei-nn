@@ -3,6 +3,7 @@
 module MXNet.NN.DataIter.Class where
 
 import GHC.Exts (Constraint)
+import Control.Monad (foldM)
 
 -- | Constraints on Dataset and the monad where the operation shall be ran.
 type family DatasetConstraint (d :: * -> *) (m :: * -> *) :: Constraint
@@ -39,3 +40,4 @@ instance Dataset [] where
     zipD = zip
     sizeD = return . length
     forEachD = flip mapM
+    foldD list ele func = foldM func ele list

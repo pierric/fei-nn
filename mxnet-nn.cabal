@@ -43,7 +43,6 @@ Library
                           , aeson >= 1.2
                           , containers >= 0.5
                           , template-haskell >= 2.12
-                          , haskell-src-meta >= 0.8
                           , graphviz
                           , text >= 1.2
                           , bytestring >= 0.10

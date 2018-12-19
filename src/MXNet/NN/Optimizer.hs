@@ -38,7 +38,7 @@ class Optimizer (opt :: * -> *) where
              -> String                               -- symbol name to optimize
              -> NDArray dytpe                        -- parameter
              -> NDArray dtype                        -- gradient
-             -> m (NDArray dtype)
+             -> m ()
 
 type family OptimizerSym (opt :: * -> *) :: Symbol
 type family OptimizerCst (opt :: * -> *) dt (args :: [*]) :: Constraint
@@ -49,7 +49,8 @@ data SGD_Opt dtype where
             => sch -> ArgsHMap (OptimizerSym SGD_Opt) args -> SGD_Opt dtype
 
 type instance OptimizerSym SGD_Opt = "sgd_update(ndarray)"
-type instance OptimizerCst SGD_Opt dt args = HasArgs (OptimizerSym SGD_Opt) args '["wd", "rescale_grad", "clip_gradient"]
+-- 1.0.0 type instance OptimizerCst SGD_Opt dt args = HasArgs (OptimizerSym SGD_Opt) args '["wd", "rescale_grad", "clip_gradient"]
+type instance OptimizerCst SGD_Opt dt args = HasArgs (OptimizerSym SGD_Opt) args '["wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer SGD_Opt where
     data OptimizerTag SGD_Opt = SGD
@@ -58,7 +59,7 @@ instance Optimizer SGD_Opt where
         nup <- use stat_num_upd
         let lr = getLR sch nup
         stat_last_lr .= lr
-        liftIO $ NDArray . head <$> A.sgd_update (
+        liftIO $ A.sgd_update_upd [weight] (
             #weight := weight   .& 
             #grad   := gradient .& 
             #lr     := lr       .& args)
@@ -69,7 +70,8 @@ data SGD_Mom_Opt dtype where
                 => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) args -> (IORef (M.HashMap String (NDArray dtype))) -> SGD_Mom_Opt dtype
 
 type instance OptimizerSym SGD_Mom_Opt = "sgd_mom_update(ndarray)"
-type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient"]
+-- 1.0.0 type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient"]
+type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer SGD_Mom_Opt where
     data OptimizerTag SGD_Mom_Opt = SGD'Mom
@@ -89,7 +91,7 @@ instance Optimizer SGD_Mom_Opt where
                     writeIORef emaref (M.insert symbol (NDArray mom) ema)
                     return mom
                 Just (NDArray a) -> return a
-            NDArray . head <$> A.sgd_mom_update (
+            A.sgd_mom_update_upd [weight] (
                 #weight := weight   .& 
                 #grad   := gradient .& 
                 #mom    := momentum .& 
@@ -101,7 +103,8 @@ data ADAM_Opt dtype where
             => sch -> ArgsHMap (OptimizerSym ADAM_Opt) args -> IORef (M.HashMap String (NDArray dtype, NDArray dtype)) -> ADAM_Opt dtype
 
 type instance OptimizerSym ADAM_Opt = "adam_update(ndarray)"
-type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient"]
+-- 1.0.0 type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient"]
+type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer ADAM_Opt where
     data OptimizerTag ADAM_Opt = ADAM
@@ -122,7 +125,7 @@ instance Optimizer ADAM_Opt where
                     writeIORef emaref (M.insert symbol (NDArray avg, NDArray var) ema)
                     return (avg, var)
                 Just (NDArray a, NDArray v) -> return (a, v)
-            NDArray . head <$> A.adam_update (
+            A.adam_update_upd [weight] (
                 #weight := weight     .&
                 #grad   := gradient   .&
                 #mean   := moving_avg .&

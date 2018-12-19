@@ -45,7 +45,8 @@ fullyConnected name args = do
     else
       S._FullyConnected name (#bias := b .& #weight := w .& args)
 
-pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
+-- 1.0.0 pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
+pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off", "p_value", "count_include_pad"]
         => String -> ArgsHMap "_Pooling(symbol)" args -> IO SymbolHandle
 pooling = S._Pooling
 

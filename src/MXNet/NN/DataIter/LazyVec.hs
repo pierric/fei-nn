@@ -82,3 +82,7 @@ instance Dataset LVec where
     -- LVec does not support infinite stream, so we override the 
     -- default implementations
     forEachD_i  dat = forEachD (zipD (fromListD [1..size dat]) dat)
+
+    foldD dat ele proc = do
+        vec <- liftIO $ toVec dat
+        V.foldM proc ele vec
