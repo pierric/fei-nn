@@ -12,8 +12,7 @@ import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Text.Printf (printf)
 import qualified Data.Vector.Storable as SV
-import Control.Lens (makeLenses, use, (^.))
-import Control.Monad.State.Strict (lift)
+import Control.Lens (makeLenses, (^.))
 
 import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
@@ -124,18 +123,6 @@ instance EvalMetricMethod CrossEntropy where
     format (CrossEntropy metric) = liftIO $ do
         (s, n) <- getBaseMetric metric 
         return $ printf "<%s: %0.3f>" (_metric_name metric) (realToFrac s / fromIntegral n :: Float)
-
--- | Learning rate
-data DumpLearningRate a = DumpLearningRate
-
-mLR :: (DType dtype, MonadIO m) => m (DumpLearningRate dtype)
-mLR = return DumpLearningRate
-
-instance EvalMetricMethod DumpLearningRate where
-    evaluate _ _ _ = return ()
-    format _ = do
-        lr <- lift $ use stat_last_lr
-        return $ printf "<lr: %0.6f>" lr
 
 data ListOfMetric a dt where
     MNil :: ListOfMetric '[] dt

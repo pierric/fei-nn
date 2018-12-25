@@ -4,6 +4,10 @@ module MXNet.NN.DataIter.Class where
 
 import GHC.Exts (Constraint)
 import Control.Monad (foldM)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.HashMap.Strict as M
+
+import MXNet.Base (NDArray, DType, ndshape)
 
 -- | Constraints on Dataset and the monad where the operation shall be ran.
 type family DatasetConstraint (d :: * -> *) (m :: * -> *) :: Constraint
@@ -34,6 +38,8 @@ class Dataset (d :: * -> *) where
 
     foldD :: (DatasetConstraint d m, Monad m) => d e -> a -> (a -> e -> m a) -> m a
 
+    takeD :: (DatasetConstraint d m, Monad m) => Int -> d e -> m [e]
+
 type instance DatasetConstraint [] m = ()
 instance Dataset [] where
     fromListD = id
@@ -41,3 +47,15 @@ instance Dataset [] where
     sizeD = return . length
     forEachD = flip mapM
     foldD list ele func = foldM func ele list
+    takeD n = return . take n
+
+class DataItem e a | e -> a where
+    batchSizeD :: MonadIO m => e -> m Int
+    makePlaceholderMapD :: MonadIO m => e -> [String] -> m (M.HashMap String (NDArray a))
+
+instance DType e => DataItem (NDArray e, NDArray e) e where
+    batchSizeD (v1, v2) = liftIO $ do
+        batch_size:_ <- ndshape v1
+        return batch_size
+
+    makePlaceholderMapD (v1, v2) vars = return $ M.fromList $ zip vars [v1,v2]
