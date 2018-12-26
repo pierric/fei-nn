@@ -94,7 +94,7 @@ main = do
                 eval <- format metric
                 liftIO $ putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
                 liftIO $ hFlush stdout
-                fitAndEval optimizer net (M.fromList [("x", x), ("y", y)]) metric
+                fitAndEval optimizer (M.fromList [("x", x), ("y", y)]) metric
             liftIO $ putStrLn ""
         
         liftIO $ putStrLn $ "[Test] "
@@ -102,7 +102,7 @@ main = do
             liftIO $ do 
                 putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
                 hFlush stdout
-            [y'] <- forwardOnly net (M.fromList [("x", Just x), ("y", Nothing)])
+            [y'] <- forwardOnly (M.fromList [("x", Just x), ("y", Nothing)])
             ind1 <- liftIO $ toVector y
             ind2 <- liftIO $ argmax y' >>= toVector
             return (ind1, ind2)

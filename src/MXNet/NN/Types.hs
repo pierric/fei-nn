@@ -42,8 +42,9 @@ instance CallbackClass Callback where
 
 -- | Session is all the 'Parameters' and a 'Device'
 -- type Session a = (M.HashMap String (Parameter a), Context)
-data Session a = Session { 
-      _sess_placeholders :: M.HashMap String [Int]
+data Session a = Session {
+      _sess_symbol :: Symbol a
+    , _sess_placeholders :: M.HashMap String [Int]
     , _sess_param   :: !(M.HashMap String (Parameter a))
     , _sess_context :: !Context
     , _sess_callbacks :: [Callback]

@@ -92,6 +92,7 @@ initialize sym config = do
     inp_args <- M.traverseWithKey (initI placeholder spec2 dinit) inp_with_shp
     aux_args <- M.traverseWithKey (initA dinit) aux_with_shp
     return $ Session {
+        _sess_symbol = sym,
         _sess_placeholders = _cfg_placeholders config,
         _sess_param = inp_args `M.union` aux_args,
         _sess_context = cxt,
@@ -182,9 +183,10 @@ initialize sym config = do
 --                 A._copyto_upd [unNDArray ndarray_dst] (#data := unNDArray ndarray_src .& Nil)
 
 -- | bind the symbolic network with actual parameters
-bind :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> Bool -> TrainM a m (Executor a)
-bind net dat train_ = do
+bind :: (DType a, MonadIO m, MonadThrow m) => M.HashMap String (Maybe (NDArray a)) -> Bool -> TrainM a m (Executor a)
+bind dat train_ = do
     Context{..} <- use sess_context
+    net <- use sess_symbol
 
     (inp_shps, aux_shps) <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
     modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
@@ -263,9 +265,10 @@ bind net dat train_ = do
 
 -- | single step train. Must provide all the placeholders.
 fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt) 
-    => opt a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m (Executor a)
-fit opt net datAndLbl = do
-    exec <- bind net (M.map Just datAndLbl) True
+    => opt a -> M.HashMap String (NDArray a) -> TrainM a m (Executor a)
+fit opt datAndLbl = do
+    net <- use sess_symbol
+    exec <- bind (M.map Just datAndLbl) True
     liftIO $ do 
         mxExecutorForward (unExecutor exec) True
         mxExecutorBackward (unExecutor exec) []
@@ -281,15 +284,16 @@ fit opt net datAndLbl = do
 
 -- | single step train. Must provide all the placeholders.
 fit_ :: (DType a, MonadIO m, MonadThrow m, Optimizer opt) 
-     => opt a -> Symbol a -> M.HashMap String (NDArray a) -> TrainM a m ()
-fit_ opt net datAndLbl = void $ fit opt net datAndLbl
+     => opt a -> M.HashMap String (NDArray a) -> TrainM a m ()
+fit_ opt datAndLbl = void $ fit opt datAndLbl
 
 -- | single step train. Must provide all the placeholders.
 --   After fitting, it also update the evaluation metric.
 fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, EvalMetricMethod mtr)
-           => opt a -> Symbol a -> M.HashMap String (NDArray a) -> mtr a -> TrainM a m ()
-fitAndEval opt net datAndLbl metric = do
-    Executor exec  <- fit opt net datAndLbl
+           => opt a -> M.HashMap String (NDArray a) -> mtr a -> TrainM a m ()
+fitAndEval opt datAndLbl metric = do
+    net <- use sess_symbol
+    Executor exec  <- fit opt datAndLbl
     preds <- liftIO $ map NDArray <$> mxExecutorOutputs exec
     evaluate metric datAndLbl preds
     liftIO performGC
@@ -297,12 +301,13 @@ fitAndEval opt net datAndLbl metric = do
 fitDataset :: (Dataset d, DType a, DataItem e a,
                MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),
                Optimizer opt, EvalMetricMethod mtr)
-    => opt a -> Symbol a 
+    => opt a
     -> [String]
     -> d e
     -> mtr a
     -> TrainM a m ()
-fitDataset opt net varnames dataset metric = do
+fitDataset opt varnames dataset metric = do
+    net <- use sess_symbol
     callbacks <- use sess_callbacks
     shapes <- use sess_placeholders
     total <- sizeD dataset
@@ -313,7 +318,7 @@ fitDataset opt net varnames dataset metric = do
     void $ forEachD_i dataset $ \(i, e) -> do
         forM_ callbacks (begOfBatch i batchSize)
         placeHolders <- makePlaceholderMapD e varnames
-        fitAndEval opt net placeHolders metric
+        fitAndEval opt placeHolders metric
         eval <- format metric
         liftIO $ putStr $ printf "\r\ESC[K%d/%d %s" i total eval
         forM_ callbacks (endOfBatch i batchSize)
@@ -398,9 +403,10 @@ updateParameters opt blacklist = do
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
 -- 
 -- Note that the batch size here can be different from that in the training phase.
-forwardOnly :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
-forwardOnly net dat = do
-    Executor exec <- bind net dat False
+forwardOnly :: (DType a, MonadIO m, MonadThrow m) => M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
+forwardOnly dat = do
+    net <- use sess_symbol
+    Executor exec <- bind dat False
     liftIO $ mxExecutorForward exec False
     liftIO $ map NDArray <$> mxExecutorOutputs exec
 
@@ -437,3 +443,15 @@ modifyT func = do
     s1 <- ST.lift $ func s0
     ST.put s1
 
+saveSession :: (MonadIO m, DType a) => String -> TrainM a m ()
+saveSession filename = do
+    params <- use sess_param
+    net <- use sess_symbol
+    let modelParams = M.toList $ M.mapMaybe getModelParam params
+    liftIO $ do
+        mxSymbolSaveToFile (filename ++ ".json") (unSymbol net)
+        mxNDArraySave (filename ++ ".params") modelParams
+  where
+    getModelParam (ParameterI _ Nothing) = Nothing
+    getModelParam (ParameterI _ a) = unNDArray <$> a
+    getModelParam (ParameterA a) = Just $ unNDArray a
