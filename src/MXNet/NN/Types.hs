@@ -7,6 +7,7 @@ import qualified Data.HashMap.Strict as M
 import qualified Control.Monad.State.Strict as ST
 import Control.Exception.Base (Exception)
 import Data.Typeable (Typeable)
+import Data.Dynamic (Dynamic)
 import Control.Monad.IO.Class (MonadIO)
 
 import MXNet.Base
@@ -22,32 +23,36 @@ data Statistics = Statistics {
 }
 
 class CallbackClass a where
-    begOfBatch :: MonadIO m => Int -> Int -> a -> TrainM e m ()
+    begOfBatch :: (MonadIO m, DType e) => Int -> Int -> a -> TrainM e m ()
     begOfBatch _ _ _ = return ()
-    endOfBatch :: MonadIO m => Int -> Int -> a -> TrainM e m ()
+    endOfBatch :: (MonadIO m, DType e) => Int -> Int -> a -> TrainM e m ()
     endOfBatch _ _ _ = return ()
-    begOfEpoch :: MonadIO m => Int -> a -> TrainM e m ()
-    begOfEpoch _ _ = return ()
-    endOfEpoch :: MonadIO m => Int -> a -> TrainM e m ()
-    endOfEpoch _ _ = return ()
-
+    begOfEpoch :: (MonadIO m, DType e) => Int -> Int -> a -> TrainM e m ()
+    begOfEpoch _ _ _ = return ()
+    endOfEpoch :: (MonadIO m, DType e) => Int -> Int -> a -> TrainM e m ()
+    endOfEpoch _ _ _ = return ()
+    endOfVal   :: (MonadIO m, DType e) => Int -> Int -> a -> TrainM e m ()
+    endOfVal   _ _ _ = return ()
 data Callback where
     Callback :: CallbackClass a => a -> Callback
 
 instance CallbackClass Callback where
     begOfBatch i n (Callback a) = begOfBatch i n a
     endOfBatch i n (Callback a) = endOfBatch i n a
-    begOfEpoch n (Callback a)   = begOfEpoch n a
-    endOfEpoch n (Callback a)   = endOfEpoch n a
+    begOfEpoch i n (Callback a) = begOfEpoch i n a
+    endOfEpoch i n (Callback a) = endOfEpoch i n a
+    endOfVal   i n (Callback a) = endOfVal   i n a
 
 -- | Session is all the 'Parameters' and a 'Device'
 -- type Session a = (M.HashMap String (Parameter a), Context)
 data Session a = Session {
       _sess_symbol :: Symbol a
-    , _sess_placeholders :: M.HashMap String [Int]
+    , _sess_data :: (String, [Int])
+    , _sess_label :: (String, [Int])
     , _sess_param   :: !(M.HashMap String (Parameter a))
     , _sess_context :: !Context
     , _sess_callbacks :: [Callback]
+    , _sess_store   :: M.HashMap String Dynamic
     -- , _sess_prof :: (NominalDiffTime, NominalDiffTime, NominalDiffTime, NominalDiffTime, NominalDiffTime, NominalDiffTime)
 }
 -- | TrainM is a 'StateT' monad
@@ -64,7 +69,8 @@ type TrainM a m = ST.StateT (Session a) (ST.StateT Statistics m)
 -- Note that any symbol not specified will be initialized with the 
 -- _cfg_default_initializer.
 data Config a = Config {
-    _cfg_placeholders :: M.HashMap String [Int],
+    _cfg_data :: (String, [Int]),
+    _cfg_label :: (String, [Int]),
     _cfg_initializers :: M.HashMap String (Initializer a),
     _cfg_default_initializer :: Initializer a,
     _cfg_context :: Context
@@ -85,5 +91,6 @@ data Exc = MismatchedShapeOfSym String [Int] [Int]
     deriving (Show, Typeable)
 instance Exception Exc
 
+makeLenses ''Config
 makeLenses ''Statistics
 makeLenses ''Session

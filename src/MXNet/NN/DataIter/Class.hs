@@ -51,11 +51,8 @@ instance Dataset [] where
 
 class DataItem e a | e -> a where
     batchSizeD :: MonadIO m => e -> m Int
-    makePlaceholderMapD :: MonadIO m => e -> [String] -> m (M.HashMap String (NDArray a))
 
 instance DType e => DataItem (NDArray e, NDArray e) e where
     batchSizeD (v1, v2) = liftIO $ do
         batch_size:_ <- ndshape v1
         return batch_size
-
-    makePlaceholderMapD (v1, v2) vars = return $ M.fromList $ zip vars [v1,v2]
