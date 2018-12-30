@@ -337,7 +337,7 @@ fitDataset opt trainDataset valDataset metric epochs = do
         liftIO $ hFlush stdout
         liftIO performGC
         
-        liftIO $ putStrLn "\nValidate"
+        liftIO $ putStrLn "\n[Validate]"
         valMetricData <- newMetric "val" metric
         void $ forEachD valDataset $ \(x, y) -> do 
             [pred] <- forwardOnly $ M.fromList [(data_name, Just x), (labl_name, Nothing)]
