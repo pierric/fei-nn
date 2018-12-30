@@ -1,4 +1,17 @@
+"""Convert as saved model to onnx format.
+
+The script is made after the following tutorial:
 # https://mxnet.incubator.apache.org/tutorials/onnx/export_mxnet_to_onnx.html
+
+An example to call this script.
+```
+python export_onnx.py
+  --symbol epoch_18_acc_0.80_loss_0.91.json 
+  --params epoch_18_acc_0.80_loss_0.91.params 
+  --shapes "[(1,3,32,32),(1,)]" 
+  --output epoch_18_acc_0.80_loss_0.91.onnx
+```
+"""
 
 import os
 import re
@@ -12,9 +25,31 @@ import onnx
 import click
 
 def strip_prefix(key):
+    """Remove "arg" or "aux" prefix for all the keys in the params file.
+
+    The prefix are kept in the params for compatibility reason. To use the saved
+    model in mxnet, see https://gist.github.com/pierric/b4da8783755de763bff13aea5f5e900d
+    
+    Arguments:
+        key {str} -- a key in the params dict
+    
+    Returns:
+        str -- key without prefix
+    """
+
     return key.split(":", 1)[1]
 
 def fix_shape(symbol):
+    """fix up the shapes in the attributes of nodes.
+
+    mxnet allows shape in the form of list, however the official library to export
+    model to onnx only accepts shape in the form of tuple. Here we fix up all shapes
+    in the model.
+    
+    Arguments:
+        symbol {dict} -- symbol's json
+    """
+
     list_re = re.compile('\[([0-9L|,| ]+)\]')
     for op in symbol["nodes"]:
         attrs = op.get("attrs", {})
@@ -41,7 +76,6 @@ def main(symbol, params, output, shapes):
 
     params = mx.nd.load(params)
     params = {strip_prefix(key): val for key, val in params.items()}
-    # import pdb; pdb.set_trace()
     shapes = eval(shapes)
 
     converted_model_path = onnx_mxnet.export_model(symbol, params, shapes, np.float32, output, verbose=True)
