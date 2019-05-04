@@ -37,4 +37,4 @@ Given a the symbolic graph, and feeding the placeholders (data with `Just xx`, a
 
 # Usage
 - Please see the example in the `examples` directory.
-- Also see the examples of [mxnet-dataiter](https://github.com/pierric/mxnet-dataiter) project.
+- Also see the examples of [mxnet-examples](https://github.com/pierric/mxnet-examples) repository.
