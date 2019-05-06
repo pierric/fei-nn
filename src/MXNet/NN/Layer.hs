@@ -13,6 +13,7 @@ module MXNet.NN.Layer (
   plus,
   flatten,
   identity,
+  dropout,
 ) where
 
 import MXNet.Base
@@ -82,3 +83,7 @@ flatten = S._Flatten
 identity :: HasArgs "_copy(symbol)" args '["data"]
     => String -> ArgsHMap "_copy(symbol)" args -> IO SymbolHandle
 identity = S._copy
+
+dropout :: HasArgs "_Dropout(symbol)" args '["data", "mode", "p", "axes"] 
+    => String -> ArgsHMap "_Dropout(symbol)" args -> IO SymbolHandle
+dropout = S._Dropout
