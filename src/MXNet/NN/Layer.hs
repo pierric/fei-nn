@@ -14,6 +14,7 @@ module MXNet.NN.Layer (
   flatten,
   identity,
   dropout,
+  reshape,
 ) where
 
 import MXNet.Base
@@ -87,3 +88,9 @@ identity = S._copy
 dropout :: HasArgs "_Dropout(symbol)" args '["data", "mode", "p", "axes"] 
     => String -> ArgsHMap "_Dropout(symbol)" args -> IO SymbolHandle
 dropout = S._Dropout
+
+reshape :: (HasArgs "_Reshape(symbol)" args '["data", "shape", "reverse"]
+           ,WithoutArgs "_Reshape(symbol)" args '["target_shape", "keep_highest"])
+    => String -> ArgsHMap "_Reshape(symbol)" args -> IO SymbolHandle
+reshape = S._Reshape
+
