@@ -32,6 +32,8 @@ Library
     default-extensions:     GADTs, 
                             TypeFamilies,
                             OverloadedLabels
+    if impl(ghc >= 8.6)
+        default-extensions: NoMonadFailDesugaring
     build-depends:          base >= 4.7 && < 5.0
                           , mxnet-base
                           , mxnet-ops

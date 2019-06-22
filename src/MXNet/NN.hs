@@ -77,7 +77,10 @@ inferShape (Symbol sym) known = do
     when (not complete)  $ throwM InferredShapeInComplete
     inps <- mxSymbolListArguments sym
     auxs <- mxSymbolListAuxiliaryStates sym
-    return (M.fromList $ zip inps inp_shp, M.fromList $ zip auxs aux_shp)
+    return (pair inps inp_shp, pair auxs aux_shp)
+
+  where
+    pair names shapes = M.fromList $ filter (not . null . snd) $ zip names shapes
 
 -- | initialize all parameters
 initialize :: DType a => Symbol a -> Config a -> IO (Session a)
@@ -124,13 +127,13 @@ initialize sym config = do
 --     Context{..} <- use sess_context
 --     (inp_shps, aux_shps) <- liftIO $ inferShape' net shapes
 --     modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
---         case p of 
+--         case p of
 --             ParameterI {} -> do
 --                 let ishp = inp_shps M.! k
 --                 param_shp <- liftIO $ ndshape (_param_in p)
 --                 param_in_new <- liftIO $ ensure_shape ishp (_param_in p)
---                 param_grad_new <- 
---                     if train_ then 
+--                 param_grad_new <-
+--                     if train_ then
 --                         liftIO $ mapM (ensure_shape ishp) (_param_grad p)
 --                     else
 --                         return Nothing
@@ -147,7 +150,7 @@ initialize sym config = do
 --         -- the parameters to bind should be arranged in the same order as the names
 --         let num_args = length names
 --             arg_in  = map (unNDArray . _param_in) $ map (args M.!) names
---             arg_gr  = if train_ 
+--             arg_gr  = if train_
 --                         then map (fmap unNDArray . _param_grad) $ map (args M.!) names
 --                         else replicate num_args Nothing
 --             arg_gr_req = replicate num_args (if train_ then 1 else 0)
@@ -155,7 +158,7 @@ initialize sym config = do
 --         auxnames <- mxSymbolListAuxiliaryStates (unSymbol net)
 --         let aux_arg_aux = map (unNDArray . _param_aux) $ map (args M.!) auxnames
 --         mxExecutorBind (unSymbol net) _device_type _device_id
---                         arg_in arg_gr arg_gr_req 
+--                         arg_in arg_gr arg_gr_req
 --                         aux_arg_aux
 --     return $ Executor exec_handle
 --   where
@@ -163,7 +166,7 @@ initialize sym config = do
 --     ensure_shape src_shp ndarray = do
 --         dst_cxt <- context ndarray
 --         dst_shp <- ndshape ndarray
---         if src_shp == dst_shp 
+--         if src_shp == dst_shp
 --             then return ndarray
 --             else makeEmptyNDArray src_shp dst_cxt
 
@@ -192,8 +195,8 @@ bind dat train_ = do
 
     (inp_shps, aux_shps) <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
     modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
-        case p of 
-          ParameterI {} -> do 
+        case p of
+          ParameterI {} -> do
             let ishp = inp_shps M.! k
             case M.lookup k dat of
                 -- if the name is given in the binding data, we check its consistency.
@@ -221,7 +224,7 @@ bind dat train_ = do
         -- the parameters to bind should be arranged in the same order as the names
         let num_args = length names
             arg_in  = map (unNDArray . _param_in) $ map (args M.!) names
-            arg_gr  = if train_ 
+            arg_gr  = if train_
                         then map (fmap unNDArray . _param_grad) $ map (args M.!) names
                         else replicate num_args Nothing
             arg_gr_req = replicate num_args (if train_ then 1 else 0)
@@ -229,17 +232,17 @@ bind dat train_ = do
         auxnames <- mxSymbolListAuxiliaryStates (unSymbol net)
         let aux_arg_aux = map (unNDArray . _param_aux) $ map (args M.!) auxnames
         mxExecutorBind (unSymbol net) _device_type _device_id
-                        arg_in arg_gr arg_gr_req 
+                        arg_in arg_gr arg_gr_req
                         aux_arg_aux
     return $ Executor exec_handle
   where
     -- make sure the _param_in can be used in the inference and backpropagation
     -- + user data input can be in a different context w.r.t. session configuration
     --   + copy inp with the right context
-    -- + batch size can be different from the initial configuration, or at the time 
+    -- + batch size can be different from the initial configuration, or at the time
     --   to swap training and inference
     --   + create one and copy it
-    -- + for inferenceOnly, labels' NDArray can be uninitialized. 
+    -- + for inferenceOnly, labels' NDArray can be uninitialized.
     --   + just create one
     ensure_consistency :: DType a => Either (NDArray a) [Int] -> Parameter a -> IO (Parameter a)
     ensure_consistency (Left a) p = do
@@ -255,36 +258,36 @@ bind dat train_ = do
             _ -> do
                 a_copy <- makeEmptyNDArray src_shp dst_cxt
                 A._copyto_upd [unNDArray a_copy] (#data := unNDArray a .& Nil)
-                return $! p {_param_in = a_copy}    
+                return $! p {_param_in = a_copy}
     ensure_consistency (Right src_shp) p = do
         dst_cxt <- context (_param_in p)
         dst_shp <- ndshape (_param_in p)
-        if src_shp == dst_shp 
+        if src_shp == dst_shp
             then return p
             else do
                 dummy <- makeEmptyNDArray src_shp dst_cxt
                 return $! p {_param_in = dummy}
 
 -- | single step train. Must provide all the placeholders.
-fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt) 
+fit :: (DType a, MonadIO m, MonadThrow m, Optimizer opt)
     => opt a -> M.HashMap String (NDArray a) -> TrainM a m (Executor a)
 fit opt datAndLbl = do
     exec <- bind (M.map Just datAndLbl) True
-    liftIO $ do 
+    liftIO $ do
         mxExecutorForward (unExecutor exec) True
         mxExecutorBackward (unExecutor exec) []
     -- forward/backward are asynchronised operation in mxnet, in a
-    -- sense that only opcodes are pushed onto an internal execution 
+    -- sense that only opcodes are pushed onto an internal execution
     -- stack, and there is a executor running in a separate thread.
-    -- It is possible that an OOM of CPU memory occurs, if 'fit' are 
-    -- called so fast that too many opcodes and data on the stack, 
+    -- It is possible that an OOM of CPU memory occurs, if 'fit' are
+    -- called so fast that too many opcodes and data on the stack,
     -- as described in issue #1
     updateParameters opt datAndLbl
     liftIO performGC
     return exec
 
 -- | single step train. Must provide all the placeholders.
-fit_ :: (DType a, MonadIO m, MonadThrow m, Optimizer opt) 
+fit_ :: (DType a, MonadIO m, MonadThrow m, Optimizer opt)
      => opt a -> M.HashMap String (NDArray a) -> TrainM a m ()
 fit_ opt datAndLbl = void $ fit opt datAndLbl
 
@@ -298,14 +301,14 @@ fitAndEval opt datAndLbl metric = do
     evaluate metric datAndLbl pred
     liftIO performGC
 
-fitDataset :: (Dataset d, DType a, 
+fitDataset :: (Dataset d, DType a,
         MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),
         Optimizer opt, EvalMetricMethod mtr)
-    => opt a 
+    => opt a
     -> d (NDArray a, NDArray a)
     -> d (NDArray a, NDArray a)
-    -> mtr a 
-    -> Int 
+    -> mtr a
+    -> Int
     -> TrainM a m ()
 fitDataset opt trainDataset valDataset metric epochs = do
     net <- use sess_symbol
@@ -332,14 +335,14 @@ fitDataset opt trainDataset valDataset metric epochs = do
             liftIO $ putStr $ printf "\r\ESC[K%d/%d %s" i total eval
             forM_ callbacks (endOfBatch i batchSize)
             liftIO $ hFlush stdout
-    
+
         forM_ callbacks (endOfEpoch epochInd total)
         liftIO $ hFlush stdout
         liftIO performGC
-        
+
         liftIO $ putStrLn "\n[Validate]"
         valMetricData <- newMetric "val" metric
-        void $ forEachD valDataset $ \(x, y) -> do 
+        void $ forEachD valDataset $ \(x, y) -> do
             [pred] <- forwardOnly $ M.fromList [(data_name, Just x), (labl_name, Nothing)]
             evaluate valMetricData (M.fromList [(data_name, x), (labl_name, y)]) pred
         eval <- format valMetricData
@@ -347,7 +350,7 @@ fitDataset opt trainDataset valDataset metric epochs = do
 
         forM_ callbacks (endOfVal epochInd total)
         liftIO $ putStrLn ""
-    
+
 fitDataset_ :: (Dataset d, DType a,
                MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),
                Optimizer opt, EvalMetricMethod mtr)
@@ -378,7 +381,7 @@ fitDataset_ opt varnames dataset metric = do
 -- fitDataset :: (Dataset d, DType a, DataItem e a,
 --                MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),
 --                Optimizer opt, EvalMetricMethod mtr)
---     => opt a -> Symbol a 
+--     => opt a -> Symbol a
 --     -> [String]
 --     -> d e
 --     -> mtr a
@@ -404,7 +407,7 @@ fitDataset_ opt varnames dataset metric = do
 --         t2 <- liftIO getCurrentTime
 --         sess_prof . _1 += diffUTCTime t2 t1
 
---         liftIO $ do 
+--         liftIO $ do
 --             mxExecutorForward exec True
 --             mxExecutorBackward exec []
 
@@ -437,19 +440,19 @@ fitDataset_ opt varnames dataset metric = do
 --     forM_ callbacks (endOfEpoch total)
 --     liftIO $ hFlush stdout
 
-updateParameters :: (MonadIO m, Optimizer opt, DType dtype) 
+updateParameters :: (MonadIO m, Optimizer opt, DType dtype)
                  => opt dtype -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
     params <- use sess_param
     forM_ (M.toList params) $ \ (k, v) -> do
-        case (v, M.member k blacklist, _param_grad v) of 
+        case (v, M.member k blacklist, _param_grad v) of
           (ParameterI {}, False, Just grad) -> ST.lift $ optimize opt k (_param_in v) grad
           _ -> return ()
     ST.lift (stat_num_upd += 1)
     -- waitParams
 
 -- | forward only. Must provide all the placeholders, setting the data to @Just xx@, and set label to @Nothing@.
--- 
+--
 -- Note that the batch size here can be different from that in the training phase.
 forwardOnly :: (DType a, MonadIO m, MonadThrow m) => M.HashMap String (Maybe (NDArray a)) -> TrainM a m [NDArray a]
 forwardOnly dat = do
@@ -460,11 +463,11 @@ forwardOnly dat = do
 waitParams :: (MonadIO m, DType a) => TrainM a m ()
 waitParams = do
     params <- use sess_param
-    forM_ params (\param -> 
-        case param of 
-            ParameterA arr1 -> 
+    forM_ params (\param ->
+        case param of
+            ParameterA arr1 ->
                 wait arr1
-            ParameterI arr1 Nothing -> 
+            ParameterI arr1 Nothing ->
                 wait arr1
             ParameterI arr1 (Just arr2) -> do
                 wait arr1
@@ -478,10 +481,10 @@ getContext :: Monad m => TrainM a m Context
 getContext = use sess_context
 
 -- | modify the state within the inner monad
--- 
--- thanks to lens, we can modify the first field of the state with following 
+--
+-- thanks to lens, we can modify the first field of the state with following
 -- combinator:
--- 
+--
 -- modifyT . traverseOf _1
 --  :: (Field1 s s a b, Monad m) => (a -> m b) -> StateT s m ()
 modifyT :: Monad m => (s -> m s) -> ST.StateT s m ()
