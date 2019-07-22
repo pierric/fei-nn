@@ -1,8 +1,6 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
 module MXNet.NN (
     Parameter(..),
     Config(..),
@@ -12,7 +10,7 @@ module MXNet.NN (
     TrainM,
     CallbackClass(..), Callback(..),
     train,
-    inferShape,
+    inferShapeT,
     initialize,
     fit, fit_, fitAndEval, fitDataset,
     forwardOnly,
@@ -30,7 +28,7 @@ import qualified Data.HashMap.Strict as M
 import qualified Control.Monad.State.Strict as ST
 import Data.Maybe (isJust, fromJust, maybe)
 import Data.Foldable (forM_)
-import Control.Monad (when, void)
+import Control.Monad (when, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 import Control.Lens (traverseOf, use, (+=), (^.))
@@ -55,32 +53,14 @@ import MXNet.NN.Callback
 train :: (DType a, Monad m) => Session a -> TrainM a m r -> m r
 train sess proc = ST.evalStateT (ST.evalStateT proc sess) (Statistics 0 0)
 
--- inferShape' :: DType a => Symbol a -> M.HashMap String [Int] -> IO (M.HashMap String [Int], M.HashMap String [Int])
--- inferShape' (Symbol sym) known = do
---     let (names, shapes) = unzip $ M.toList known
---     let arg_ind = scanl (+) 0 $ map length shapes
---         arg_shp = concat shapes
---     (inp_shp, _, aux_shp, complete) <- mxSymbolInferShape sym names arg_ind arg_shp
---     when (not complete)  $ throwM InferredShapeInComplete
---     inps <- mxSymbolListArguments sym
---     auxs <- mxSymbolListAuxiliaryStates sym
---     return (M.fromList $ zip inps inp_shp, M.fromList $ zip auxs aux_shp)
 
 -- | infer the shapes of input and auxiliary symbols in a symbolic neural network
-inferShape :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int], M.HashMap String [Int])
-inferShape (Symbol sym) known = do
-    let (names, vals) = unzip $ M.toList known
-    shapes <- mapM ndshape vals
-    let arg_ind = scanl (+) 0 $ map length shapes
-        arg_shp = concat shapes
-    (inp_shp, _, aux_shp, complete) <- mxSymbolInferShape sym names arg_ind arg_shp
-    when (not complete)  $ throwM InferredShapeInComplete
-    inps <- mxSymbolListArguments sym
-    auxs <- mxSymbolListAuxiliaryStates sym
-    return (pair inps inp_shp, pair auxs aux_shp)
-
-  where
-    pair names shapes = M.fromList $ filter (not . null . snd) $ zip names shapes
+inferShapeT :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int], M.HashMap String [Int])
+inferShapeT sym known = do
+    knownShapes <- M.traverseWithKey (\_ -> ndshape) known
+    (inps, outs, auxs, complete) <- inferShape sym (M.toList knownShapes)
+    unless complete $ throwM InferredShapeInComplete
+    return (M.fromList inps, M.fromList auxs)
 
 -- | initialize all parameters
 initialize :: DType a => Symbol a -> Config a -> IO (Session a)
@@ -91,7 +71,7 @@ initialize sym config = do
         cxt   = _cfg_context config
     -- give a initial batch_size = 1 for the placeholders
     placeholders  <- mapM (\shp -> makeEmptyNDArray (1:shp) cxt) spec1
-    (inp_with_shp, aux_with_shp) <- inferShape sym placeholders
+    (inp_with_shp, aux_with_shp) <- inferShapeT sym placeholders
     inp_args <- M.traverseWithKey (initI placeholders spec2 dinit) inp_with_shp
     aux_args <- M.traverseWithKey (initA dinit) aux_with_shp
     return $ Session {
@@ -107,7 +87,7 @@ initialize sym config = do
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
     -- other input symbols are initialized by an initializer.
-    initI placeholder spec2 dinit inp shp = do
+    initI placeholder spec2 dinit inp shp =
         case M.lookup inp placeholder of
             Just in_arg -> do
                 return $ ParameterI in_arg Nothing
@@ -193,8 +173,8 @@ bind dat train_ = do
     Context{..} <- use sess_context
     net <- use sess_symbol
 
-    (inp_shps, aux_shps) <- liftIO $ inferShape net (M.map fromJust $ M.filter isJust dat)
-    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
+    (inp_shps, aux_shps) <- liftIO $ inferShapeT net (M.map fromJust $ M.filter isJust dat)
+    modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p ->
         case p of
           ParameterI {} -> do
             let ishp = inp_shps M.! k
@@ -444,7 +424,7 @@ updateParameters :: (MonadIO m, Optimizer opt, DType dtype)
                  => opt dtype -> M.HashMap String any -> TrainM dtype m ()
 updateParameters opt blacklist = do
     params <- use sess_param
-    forM_ (M.toList params) $ \ (k, v) -> do
+    forM_ (M.toList params) $ \ (k, v) ->
         case (v, M.member k blacklist, _param_grad v) of
           (ParameterI {}, False, Just grad) -> ST.lift $ optimize opt k (_param_in v) grad
           _ -> return ()
