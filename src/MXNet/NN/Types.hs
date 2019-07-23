@@ -47,12 +47,12 @@ instance CallbackClass Callback where
 -- type Session a = (M.HashMap String (Parameter a), Context)
 data Session a = Session {
       _sess_symbol :: Symbol a
-    , _sess_data :: (String, [Int])
-    , _sess_label :: (String, [Int])
-    , _sess_param   :: !(M.HashMap String (Parameter a))
-    , _sess_context :: !Context
+    , _sess_data      :: M.HashMap String [Int]
+    , _sess_label     :: M.HashMap String [Int]
+    , _sess_param     :: !(M.HashMap String (Parameter a))
+    , _sess_context   :: !Context
     , _sess_callbacks :: [Callback]
-    , _sess_store   :: M.HashMap String Dynamic
+    , _sess_store     :: M.HashMap String Dynamic
     -- , _sess_prof :: (NominalDiffTime, NominalDiffTime, NominalDiffTime, NominalDiffTime, NominalDiffTime, NominalDiffTime)
 }
 -- | TrainM is a 'StateT' monad
@@ -69,11 +69,11 @@ type TrainM a m = ST.StateT (Session a) (ST.StateT Statistics m)
 -- Note that any symbol not specified will be initialized with the 
 -- _cfg_default_initializer.
 data Config a = Config {
-    _cfg_data :: (String, [Int]),
-    _cfg_label :: (String, [Int]),
-    _cfg_initializers :: M.HashMap String (Initializer a),
+    _cfg_data                :: M.HashMap String [Int],
+    _cfg_label               :: M.HashMap String [Int],
+    _cfg_initializers        :: M.HashMap String (Initializer a),
     _cfg_default_initializer :: Initializer a,
-    _cfg_context :: Context
+    _cfg_context             :: Context
 }
 
 -- | Initializer is about how to create a NDArray from the symbol name and the given shape. 
@@ -88,6 +88,7 @@ data Exc = MismatchedShapeOfSym String [Int] [Int]
          | NotAParameter String
          | InvalidArgument String
          | InferredShapeInComplete
+         | DatasetMalformed
     deriving (Show, Typeable)
 instance Exception Exc
 

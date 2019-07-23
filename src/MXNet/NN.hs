@@ -31,10 +31,11 @@ import Data.Foldable (forM_)
 import Control.Monad (when, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Control.Lens (traverseOf, use, (+=), (^.))
+import Control.Lens (traverseOf, use, (+=), (^.), (%=))
 import System.IO (hFlush, stdout)
 import System.Mem
 import Text.Printf
+import Data.Dynamic (toDyn)
 -- import Control.Lens.Tuple
 
 import MXNet.Base
@@ -58,14 +59,14 @@ train sess proc = ST.evalStateT (ST.evalStateT proc sess) (Statistics 0 0)
 inferShapeT :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int], M.HashMap String [Int])
 inferShapeT sym known = do
     knownShapes <- M.traverseWithKey (\_ -> ndshape) known
-    (inps, outs, auxs, complete) <- inferShape sym (M.toList knownShapes)
+    (inps, _, auxs, complete) <- inferShape sym (M.toList knownShapes)
     unless complete $ throwM InferredShapeInComplete
     return (M.fromList inps, M.fromList auxs)
 
 -- | initialize all parameters
 initialize :: DType a => Symbol a -> Config a -> IO (Session a)
 initialize sym config = do
-    let spec1 = M.difference (M.fromList [config ^. cfg_data]) (_cfg_initializers config)
+    let spec1 = M.difference (config ^. cfg_data) (_cfg_initializers config)
         spec2 = _cfg_initializers config
         dinit = _cfg_default_initializer config
         cxt   = _cfg_context config
@@ -75,13 +76,13 @@ initialize sym config = do
     inp_args <- M.traverseWithKey (initI placeholders spec2 dinit) inp_with_shp
     aux_args <- M.traverseWithKey (initA dinit) aux_with_shp
     return $ Session {
-        _sess_symbol = sym,
-        _sess_data = config ^. cfg_data,
-        _sess_label = config ^. cfg_label,
-        _sess_param = inp_args `M.union` aux_args,
+        _sess_symbol  = sym,
+        _sess_data    = config ^. cfg_data,
+        _sess_label   = config ^. cfg_label,
+        _sess_param   = inp_args `M.union` aux_args,
         _sess_context = cxt,
         _sess_callbacks = [],
-        _sess_store = M.empty
+        _sess_store   = M.empty
     }
   where
     -- initialize input symbols.
@@ -278,27 +279,28 @@ fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, EvalMetricMethod
 fitAndEval opt datAndLbl metric = do
     Executor exec  <- fit opt datAndLbl
     [pred] <- liftIO $ map NDArray <$> mxExecutorOutputs exec
-    evaluate metric datAndLbl pred
+    eval_results <- evaluate metric datAndLbl pred
+    sess_store %= M.union (M.map toDyn eval_results)
     liftIO performGC
 
-fitDataset :: (Dataset d, DType a,
+fitDataset :: (Dataset d, DatasetProp d e, DType a,
         MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),
         Optimizer opt, EvalMetricMethod mtr)
-    => opt a
-    -> d (NDArray a, NDArray a)
-    -> d (NDArray a, NDArray a)
+    => d e
+    -> d e
+    -> ([String] -> e -> M.HashMap String (NDArray a))
+    -> opt a
     -> mtr a
     -> Int
     -> TrainM a m ()
-fitDataset opt trainDataset valDataset metric epochs = do
-    net <- use sess_symbol
+fitDataset trainDataset valDataset make_binding opt metric epochs = do
     callbacks <- use sess_callbacks
-    (data_name, data_shape) <- use sess_data
-    (labl_name, labl_shape) <- use sess_label
 
-    total <- sizeD trainDataset
-    [example0] <- takeD 1 trainDataset
-    batchSize <- batchSizeD example0
+    data_vars <- M.keys <$> use sess_data
+    labl_vars <- M.keys <$> use sess_label
+
+    total     <- sizeD trainDataset
+    batchSize <- batchSizeD trainDataset
 
     liftIO $ putStrLn $ "[Train]"
     forM_ (enumFromTo 1 epochs) $ \epochInd -> do
@@ -307,9 +309,9 @@ fitDataset opt trainDataset valDataset metric epochs = do
         liftIO $ putStrLn $ "epoch " ++ show epochInd
         forM_ callbacks (begOfEpoch epochInd total)
 
-        void $ forEachD_i trainDataset $ \(i, (darr,larr)) -> do
+        void $ forEachD_i trainDataset $ \(i, item) -> do
             forM_ callbacks (begOfBatch i batchSize)
-            let binding = M.fromList [(data_name, darr), (labl_name, larr)]
+            let binding = make_binding (data_vars ++ labl_vars) item
             fitAndEval opt binding trainMetricData
             eval <- format trainMetricData
             liftIO $ putStr $ printf "\r\ESC[K%d/%d %s" i total eval
@@ -322,34 +324,36 @@ fitDataset opt trainDataset valDataset metric epochs = do
 
         liftIO $ putStrLn "\n[Validate]"
         valMetricData <- newMetric "val" metric
-        void $ forEachD valDataset $ \(x, y) -> do
-            [pred] <- forwardOnly $ M.fromList [(data_name, Just x), (labl_name, Nothing)]
-            evaluate valMetricData (M.fromList [(data_name, x), (labl_name, y)]) pred
+        void $ forEachD valDataset $ \item -> do
+            let whole_binding = make_binding (data_vars ++ labl_vars) item
+                infer_binding = M.map Just $ M.filterWithKey (const . (`elem` data_vars)) whole_binding
+            [pred] <- forwardOnly infer_binding
+            evaluate valMetricData whole_binding pred
         eval <- format valMetricData
         liftIO $ putStrLn eval
 
         forM_ callbacks (endOfVal epochInd total)
         liftIO $ putStrLn ""
 
-fitDataset_ :: (Dataset d, DType a,
+fitDataset_ :: (Dataset d, DatasetProp d e, DType a,
                MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),
                Optimizer opt, EvalMetricMethod mtr)
-    => opt a
-    -> [String]
-    -> d (NDArray a, NDArray a)
+    => d e
+    -> ([String] -> e -> M.HashMap String (NDArray a))
+    -> opt a
     -> MetricData mtr a
     -> TrainM a m ()
-fitDataset_ opt varnames dataset metric = do
+fitDataset_ dataset make_binding opt metric = do
     callbacks <- use sess_callbacks
-    total <- sizeD dataset
-    [example0] <- takeD 1 dataset
-    batchSize <- batchSizeD example0
-    (data_name, _) <- use sess_data
-    (labl_name, _) <- use sess_label
+    total     <- sizeD dataset
+    batchSize <- batchSizeD dataset
 
-    void $ forEachD_i dataset $ \(i, (darr, larr)) -> do
+    data_vars <- M.keys <$> use sess_data
+    labl_vars <- M.keys <$> use sess_label
+
+    void $ forEachD_i dataset $ \(i, item) -> do
         forM_ callbacks (begOfBatch i batchSize)
-        let binding = M.fromList [(data_name, darr), (labl_name, larr)]
+        let binding = make_binding (data_vars ++ labl_vars) item
         fitAndEval opt binding metric
         eval <- format metric
         liftIO $ putStr $ printf "\r\ESC[K%d/%d %s" i total eval

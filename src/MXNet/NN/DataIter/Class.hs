@@ -1,13 +1,8 @@
-{-# Language MultiParamTypeClasses, FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.DataIter.Class where
 
 import GHC.Exts (Constraint)
-import Control.Monad (foldM)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import qualified Data.HashMap.Strict as M
-
-import MXNet.Base (NDArray, DType, ndshape)
 
 -- | Constraints on Dataset and the monad where the operation shall be ran.
 type family DatasetConstraint (d :: * -> *) (m :: * -> *) :: Constraint
@@ -36,23 +31,11 @@ class Dataset (d :: * -> *) where
         n <- sizeD dat
         forEachD ((fromListD (replicate n n) `zipD` fromListD [1..n]) `zipD` dat) proc
 
-    foldD :: (DatasetConstraint d m, Monad m) => d e -> a -> (a -> e -> m a) -> m a
+    foldD :: (DatasetConstraint d m, Monad m) => (a -> e -> m a) -> a -> d e -> m a
 
     takeD :: (DatasetConstraint d m, Monad m) => Int -> d e -> m [e]
 
-type instance DatasetConstraint [] m = ()
-instance Dataset [] where
-    fromListD = id
-    zipD = zip
-    sizeD = return . length
-    forEachD = flip mapM
-    foldD list ele func = foldM func ele list
-    takeD n = return . take n
 
-class DataItem e a | e -> a where
-    batchSizeD :: MonadIO m => e -> m Int
-
-instance DType e => DataItem (NDArray e, NDArray e) e where
-    batchSizeD (v1, v2) = liftIO $ do
-        batch_size:_ <- ndshape v1
-        return batch_size
+class DatasetProp (d :: * -> *) e where
+    -- | Get the batch size of the dataset
+    batchSizeD :: (DatasetConstraint d m, Monad m) => d e -> m Int

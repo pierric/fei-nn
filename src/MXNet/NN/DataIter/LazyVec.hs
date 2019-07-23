@@ -83,6 +83,6 @@ instance Dataset LVec where
     -- default implementations
     forEachD_i  dat = forEachD (zipD (fromListD [1..size dat]) dat)
 
-    foldD dat ele proc = do
+    foldD proc ele dat = do
         vec <- liftIO $ toVec dat
         V.foldM proc ele vec

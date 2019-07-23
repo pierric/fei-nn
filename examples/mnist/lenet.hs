@@ -74,8 +74,8 @@ main = do
     net  <- neural
     -- GV.dotPlot net GV.Png "lenet"
     sess <- initialize net $ Config { 
-                _cfg_data = ("x", [1,28,28]),
-                _cfg_label = ("y", [1]),
+                _cfg_data = M.singleton "x" [1,28,28],
+                _cfg_label = M.singleton "y" [1],
                 _cfg_initializers = M.empty,
                 _cfg_default_initializer = default_initializer,
                 _cfg_context = contextCPU
@@ -90,7 +90,7 @@ main = do
         liftIO $ putStrLn $ "[Train] "
         forM_ (range 5) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            metric <- newMetric "train" CrossEntropy 
+            metric <- newMetric "train" (CrossEntropy "y")
             void $ forEachD_ni trainingData $ \((t,i), (x, y)) -> do
                 eval <- format metric
                 liftIO $ putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval

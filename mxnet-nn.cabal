@@ -24,6 +24,7 @@ Library
                             MXNet.NN.Initializer
                             MXNet.NN.Callback
                             MXNet.NN.DataIter.Class
+                            MXNet.NN.DataIter.Vec
                             MXNet.NN.DataIter.LazyVec
     other-modules:
     hs-source-dirs:         src

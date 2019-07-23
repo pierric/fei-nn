@@ -28,11 +28,12 @@ endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
 
 saveSession :: (MonadIO m, DType a) => String -> TrainM a m ()
 saveSession filename = do
-    (dat, _) <- use sess_data
-    (lbl, _) <- use sess_label
+    dat_vars <- M.keys <$> use sess_data
+    lbl_vars <- M.keys <$> use sess_label
     params <- use sess_param
     net <- use sess_symbol
-    let modelParams = map getModelParam $ M.toList $ M.filterWithKey (\k _ -> k /= dat && k /= lbl) params
+    let all_vars = dat_vars ++ lbl_vars
+        modelParams = map getModelParam $ M.toList $ M.filterWithKey (\k _ -> not (k `elem` all_vars)) params
     liftIO $ do
         mxSymbolSaveToFile (filename ++ ".json") (unSymbol net)
         mxNDArraySave (filename ++ ".params") modelParams
