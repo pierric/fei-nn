@@ -278,7 +278,7 @@ fitAndEval :: (DType a, MonadIO m, MonadThrow m, Optimizer opt, EvalMetricMethod
            => opt a -> M.HashMap String (NDArray a) -> MetricData mtr a -> TrainM a m ()
 fitAndEval opt datAndLbl metric = do
     Executor exec  <- fit opt datAndLbl
-    [pred] <- liftIO $ map NDArray <$> mxExecutorOutputs exec
+    pred <- liftIO $ map NDArray <$> mxExecutorOutputs exec
     eval_results <- evaluate metric datAndLbl pred
     sess_store %= M.union (M.map toDyn eval_results)
     liftIO performGC
@@ -327,7 +327,7 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
         void $ forEachD valDataset $ \item -> do
             let whole_binding = make_binding (data_vars ++ labl_vars) item
                 infer_binding = M.map Just $ M.filterWithKey (const . (`elem` data_vars)) whole_binding
-            [pred] <- forwardOnly infer_binding
+            pred <- forwardOnly infer_binding
             evaluate valMetricData whole_binding pred
         eval <- format valMetricData
         liftIO $ putStrLn eval

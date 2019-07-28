@@ -28,7 +28,7 @@ class EvalMetricMethod metric where
     evaluate :: (MonadIO m, DType a)
              => MetricData metric a           -- evaluation metric
              -> M.HashMap String (NDArray a)  -- network bindings
-             -> NDArray a                     -- output of the network
+             -> [NDArray a]                   -- output of the network
              -> m (M.HashMap String Double)
     format   :: (MonadIO m, DType a) => MetricData metric a -> m String
 
@@ -42,7 +42,7 @@ instance EvalMetricMethod Accuracy where
         a <- liftIO $ newIORef 0
         b <- liftIO $ newIORef 0
         return $ AccuracyData phase label a b
-    evaluate (AccuracyData phase label cntRef sumRef) bindings output = do
+    evaluate (AccuracyData phase label cntRef sumRef) bindings [output] = do
         liftIO $ compute output (bindings M.! label)
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
@@ -78,7 +78,7 @@ instance EvalMetricMethod CrossEntropy where
     -- | evaluate the log-loss. 
     -- preds is of shape (batch_size, num_category), each element along the second dimension gives the probability of the category.
     -- label is of shape (batch_size,), each element gives the category number.
-    evaluate (CrossEntropyData phase label cntRef sumRef) bindings output = do
+    evaluate (CrossEntropyData phase label cntRef sumRef) bindings [output] = do
         liftIO $ compute output (bindings M.! label) 
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
