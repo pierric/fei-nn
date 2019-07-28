@@ -38,4 +38,4 @@ class Dataset (d :: * -> *) where
 
 class DatasetProp (d :: * -> *) e where
     -- | Get the batch size of the dataset
-    batchSizeD :: (DatasetConstraint d m, Monad m) => d e -> m Int
+    batchSizeD :: (DatasetConstraint d m, Monad m) => d e -> m (Maybe Int)

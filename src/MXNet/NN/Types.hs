@@ -88,7 +88,7 @@ data Exc = MismatchedShapeOfSym String [Int] [Int]
          | NotAParameter String
          | InvalidArgument String
          | InferredShapeInComplete
-         | DatasetMalformed
+         | DatasetOfUnknownBatchSize
     deriving (Show, Typeable)
 instance Exception Exc
 

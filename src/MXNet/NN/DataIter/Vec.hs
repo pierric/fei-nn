@@ -6,7 +6,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Trans.Resource (MonadThrow(..))
+-- import Control.Monad.Trans.Resource (MonadThrow(..))
 
 import MXNet.NN.DataIter.Class
 import MXNet.NN.Types
@@ -29,7 +29,7 @@ instance Dataset DatasetVector where
 instance DType a => DatasetProp DatasetVector (NDArray a) where
     batchSizeD (DatasetVector dat) = liftIO $ do
         batch_size : _ <- ndshape $ V.head dat
-        return batch_size
+        return $ Just batch_size
 
 instance DType a => DatasetProp DatasetVector (NDArray a, NDArray a) where
     batchSizeD (DatasetVector dat) = do
@@ -37,5 +37,6 @@ instance DType a => DatasetProp DatasetVector (NDArray a, NDArray a) where
         liftIO $ do
             batch_size1 : _ <- ndshape arr1
             batch_size2 : _ <- ndshape arr2
-            when (batch_size1 /= batch_size2) (throwM DatasetMalformed)
-            return batch_size1
+            return $ if batch_size1 /= batch_size2
+                        then Nothing
+                        else Just batch_size1
