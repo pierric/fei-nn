@@ -41,6 +41,7 @@ import Data.Dynamic (toDyn)
 import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
 
+import MXNet.NN.NDArray
 import MXNet.NN.Types
 import MXNet.NN.Optimizer
 import MXNet.NN.EvalMetric

@@ -14,6 +14,7 @@ cabal-version:              >= 1.24
 
 Library
     exposed-modules:        MXNet.NN
+                            MXNet.NN.NDArray
                             MXNet.NN.Types
                             MXNet.NN.Utils
                             MXNet.NN.Utils.GraphViz
