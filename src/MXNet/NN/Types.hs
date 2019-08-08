@@ -89,6 +89,8 @@ data Exc = MismatchedShapeOfSym String [Int] [Int]
          | InvalidArgument String
          | InferredShapeInComplete
          | DatasetOfUnknownBatchSize
+         | LoadSessionInvalidTensorName String
+         | LoadSessionMismatchedTensorKind String
     deriving (Show, Typeable)
 instance Exception Exc
 

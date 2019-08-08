@@ -27,8 +27,8 @@ convolution :: (HasArgs "_Convolution(symbol)" args '["kernel", "num_filter", "d
                ,WithoutArgs "_Convolution(symbol)" args '["bias", "weight"])
             => String -> ArgsHMap "_Convolution(symbol)" args -> IO SymbolHandle
 convolution name args = do
-    b <- variable (name ++ "-bias")
-    w <- variable (name ++ "-weight")
+    b <- variable (name ++ "_bias")
+    w <- variable (name ++ "_weight")
     if args !? #no_bias == Just True 
       then
         S._Convolution name (#weight := w .& args)
@@ -39,8 +39,8 @@ fullyConnected :: (HasArgs "_FullyConnected(symbol)" args '["flatten", "no_bias"
                   ,WithoutArgs "_FullyConnected(symbol)" args '["bias", "weight"])
               => String -> ArgsHMap "_FullyConnected(symbol)" args -> IO SymbolHandle
 fullyConnected name args = do
-  b <- variable (name ++ "-bias")
-  w <- variable (name ++ "-weight")
+  b <- variable (name ++ "_bias")
+  w <- variable (name ++ "_weight")
   if args !? #no_bias == Just True 
     then
       S._FullyConnected name (#weight := w .& args)
@@ -63,10 +63,10 @@ softmaxoutput = S._SoftmaxOutput
 batchnorm :: HasArgs "_BatchNorm(symbol)" args '["data", "eps", "momentum", "fix_gamma", "use_global_stats", "output_mean_var", "axis", "cudnn_off"]
           => String -> ArgsHMap "_BatchNorm(symbol)" args -> IO SymbolHandle
 batchnorm name args = do
-    gamma    <- variable (name ++ "-gamma")
-    beta     <- variable (name ++ "-beta")
-    mov_mean <- variable (name ++ "-moving-mean")
-    mov_var  <- variable (name ++ "-moving-var")
+    gamma    <- variable (name ++ "_gamma")
+    beta     <- variable (name ++ "_beta")
+    mov_mean <- variable (name ++ "_moving_mean")
+    mov_var  <- variable (name ++ "_moving_var")
     S._BatchNorm name (#gamma := gamma .& #beta := beta .& #moving_mean := mov_mean .& #moving_var := mov_var .& args)
 
 cast :: HasArgs "_Cast(symbol)" args '["data", "dtype"]

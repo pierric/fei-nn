@@ -5,10 +5,17 @@ import Data.List (intersperse)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as M
 import Control.Lens (use)
+import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Trans.Resource (MonadThrow(..))
+import Text.Printf
 
-import MXNet.Base (Context(..), DType, NDArray(..), Symbol(..), mxSymbolSaveToFile, mxNDArraySave)
-import MXNet.NN.Types 
+import MXNet.Base (
+    Context(..), DType, NDArray(..), Symbol(..), 
+    HMap(..), (.&), ArgOf(..),
+    mxSymbolSaveToFile, mxNDArraySave, mxNDArrayLoad)
+import MXNet.NN.Types
+import qualified MXNet.Base.Operators.NDArray as A
 
 -- | format a shape
 formatShape :: [Int] -> String
@@ -40,3 +47,18 @@ saveSession filename = do
   where
     getModelParam (key, ParameterI a _) = ("arg:" ++ key, unNDArray a)
     getModelParam (key, ParameterA a) = ("aux:" ++ key, unNDArray a)
+
+loadSession :: (MonadThrow m, MonadIO m, DType a) => String -> TrainM a m ()
+loadSession filename = do
+    arrays <- liftIO $ mxNDArrayLoad (filename ++ ".params")
+    params <- use sess_param
+    forM_ arrays $ \(name, hdl) -> 
+        case break (==':') name of
+            (_, "") -> throwM (LoadSessionInvalidTensorName name)
+            ("", _) -> throwM (LoadSessionInvalidTensorName name)
+            (typ, ':':key) -> 
+                case (typ, M.lookup key params) of
+                    (_, Nothing) -> liftIO $ putStrLn $ printf "Tensor %s is missing." name
+                    ("arg", Just (ParameterI target grad)) -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                    ("aux", Just (ParameterA target))      -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                    _ -> throwM (LoadSessionMismatchedTensorKind name)
