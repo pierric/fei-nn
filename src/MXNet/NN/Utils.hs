@@ -48,15 +48,15 @@ saveSession filename = do
     getModelParam (key, ParameterI a _) = ("arg:" ++ key, unNDArray a)
     getModelParam (key, ParameterA a) = ("aux:" ++ key, unNDArray a)
 
-loadSession :: (MonadThrow m, MonadIO m, DType a) => String -> TrainM a m ()
-loadSession filename = do
+loadSession :: (MonadThrow m, MonadIO m, DType a) => String -> [String] -> TrainM a m ()
+loadSession filename ignores = do
     arrays <- liftIO $ mxNDArrayLoad (filename ++ ".params")
     params <- use sess_param
     forM_ arrays $ \(name, hdl) -> 
         case break (==':') name of
             (_, "") -> throwM (LoadSessionInvalidTensorName name)
             ("", _) -> throwM (LoadSessionInvalidTensorName name)
-            (typ, ':':key) -> 
+            (typ, ':':key) | not (key `elem` ignores) -> 
                 case (typ, M.lookup key params) of
                     (_, Nothing) -> liftIO $ putStrLn $ printf "Tensor %s is missing." name
                     ("arg", Just (ParameterI target grad)) -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)

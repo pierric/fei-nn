@@ -265,7 +265,6 @@ fit opt datAndLbl = do
     -- called so fast that too many opcodes and data on the stack,
     -- as described in issue #1
     updateParameters opt datAndLbl
-    liftIO performGC
     return exec
 
 -- | single step train. Must provide all the placeholders.
@@ -282,7 +281,6 @@ fitAndEval opt datAndLbl metric = do
     pred <- liftIO $ map NDArray <$> mxExecutorOutputs exec
     eval_results <- evaluate metric datAndLbl pred
     sess_store %= M.union (M.map toDyn eval_results)
-    liftIO performGC
 
 fitDataset :: (Dataset d, DatasetProp d e, DType a,
         MonadIO m, MonadThrow m, DatasetConstraint d (TrainM a m),

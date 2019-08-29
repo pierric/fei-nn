@@ -48,7 +48,9 @@ fullyConnected name args = do
       S._FullyConnected name (#bias := b .& #weight := w .& args)
 
 -- 1.0.0 pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
-pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off", "p_value", "count_include_pad"]
+-- 1.4.0 pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off", "p_value", "count_include_pad"]
+-- 1.5.0
+pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off", "p_value", "count_include_pad", "layout"]
         => String -> ArgsHMap "_Pooling(symbol)" args -> IO SymbolHandle
 pooling = S._Pooling
 
@@ -85,7 +87,9 @@ identity :: HasArgs "_copy(symbol)" args '["data"]
     => String -> ArgsHMap "_copy(symbol)" args -> IO SymbolHandle
 identity = S._copy
 
-dropout :: HasArgs "_Dropout(symbol)" args '["data", "mode", "p", "axes"] 
+-- 1.4.0 dropout :: HasArgs "_Dropout(symbol)" args '["data", "mode", "p", "axes"] 
+-- 1.5.0
+dropout :: HasArgs "_Dropout(symbol)" args '["data", "mode", "p", "axes", "cudnn_off"] 
     => String -> ArgsHMap "_Dropout(symbol)" args -> IO SymbolHandle
 dropout = S._Dropout
 

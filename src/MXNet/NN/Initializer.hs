@@ -13,6 +13,9 @@ import qualified Data.Vector.Storable as SV
 import MXNet.NN.Types
 import MXNet.NN.Utils
 
+empty :: DType a => Initializer a
+empty _ shp cxt = makeEmptyNDArray shp cxt
+
 zeros :: DType a => Initializer a
 zeros = constant 0
 
