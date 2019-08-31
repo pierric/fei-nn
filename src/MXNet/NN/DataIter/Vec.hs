@@ -24,7 +24,7 @@ instance Dataset DatasetVector where
     forEachD dat func   = V.toList <$> V.forM (_dsv_unwrap dat) func
     forEachD_i dat func = V.toList <$> V.forM (V.indexed $ _dsv_unwrap dat) func
     foldD func ele = V.foldM' func ele . _dsv_unwrap
-    takeD n = return . V.toList . V.take n . _dsv_unwrap
+    takeD n = DatasetVector . V.take n . _dsv_unwrap
 
 instance DType a => DatasetProp DatasetVector (NDArray a) where
     batchSizeD (DatasetVector dat) = liftIO $ do

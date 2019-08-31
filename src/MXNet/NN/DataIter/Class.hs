@@ -33,7 +33,7 @@ class Dataset (d :: * -> *) where
 
     foldD :: (DatasetConstraint d m, Monad m) => (a -> e -> m a) -> a -> d e -> m a
 
-    takeD :: (DatasetConstraint d m, Monad m) => Int -> d e -> m [e]
+    takeD :: Int -> d e -> d e
 
 
 class DatasetProp (d :: * -> *) e where
