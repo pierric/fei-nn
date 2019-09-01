@@ -296,7 +296,7 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
     callbacks <- use sess_callbacks
 
     data_vars <- M.keys <$> use sess_data
-    labl_vars <- M.keys <$> use sess_label
+    labl_vars <- use sess_label
 
     total     <- sizeD trainDataset
     batchSize <- batchSizeD trainDataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
@@ -348,7 +348,7 @@ fitDataset_ dataset make_binding opt metric = do
     batchSize <- batchSizeD dataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
 
     data_vars <- M.keys <$> use sess_data
-    labl_vars <- M.keys <$> use sess_label
+    labl_vars <- use sess_label
 
     void $ forEachD_i dataset $ \(i, item) -> do
         forM_ callbacks (begOfBatch i batchSize)

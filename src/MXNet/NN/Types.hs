@@ -48,7 +48,7 @@ instance CallbackClass Callback where
 data Session a = Session {
       _sess_symbol :: Symbol a
     , _sess_data      :: M.HashMap String [Int]
-    , _sess_label     :: M.HashMap String [Int]
+    , _sess_label     :: [String]
     , _sess_param     :: !(M.HashMap String (Parameter a))
     , _sess_context   :: !Context
     , _sess_callbacks :: [Callback]
@@ -70,7 +70,7 @@ type TrainM a m = ST.StateT (Session a) (ST.StateT Statistics m)
 -- _cfg_default_initializer.
 data Config a = Config {
     _cfg_data                :: M.HashMap String [Int],
-    _cfg_label               :: M.HashMap String [Int],
+    _cfg_label               :: [String],
     _cfg_initializers        :: M.HashMap String (Initializer a),
     _cfg_default_initializer :: Initializer a,
     _cfg_context             :: Context

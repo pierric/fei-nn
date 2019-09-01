@@ -36,7 +36,7 @@ endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
 saveSession :: (MonadIO m, DType a) => String -> TrainM a m ()
 saveSession filename = do
     dat_vars <- M.keys <$> use sess_data
-    lbl_vars <- M.keys <$> use sess_label
+    lbl_vars <- use sess_label
     params <- use sess_param
     net <- use sess_symbol
     let all_vars = dat_vars ++ lbl_vars
@@ -56,9 +56,10 @@ loadSession filename ignores = do
         case break (==':') name of
             (_, "") -> throwM (LoadSessionInvalidTensorName name)
             ("", _) -> throwM (LoadSessionInvalidTensorName name)
-            (typ, ':':key) | not (key `elem` ignores) -> 
-                case (typ, M.lookup key params) of
-                    (_, Nothing) -> liftIO $ putStrLn $ printf "Tensor %s is missing." name
-                    ("arg", Just (ParameterI target grad)) -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-                    ("aux", Just (ParameterA target))      -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (typ, ':':key) -> 
+                case (key `elem` ignores, typ, M.lookup key params) of
+                    (True, _, _) -> return ()
+                    (_, _, Nothing) -> liftIO $ putStrLn $ printf "Tensor %s is missing." name
+                    (_, "arg", Just (ParameterI target grad)) -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                    (_, "aux", Just (ParameterA target))      -> liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     _ -> throwM (LoadSessionMismatchedTensorKind name)
