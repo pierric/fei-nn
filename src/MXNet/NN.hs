@@ -10,7 +10,6 @@ module MXNet.NN (
     TrainM,
     CallbackClass(..), Callback(..),
     train,
-    inferShapeT,
     initialize,
     fit, fit_, fitAndEval, fitDataset,
     forwardOnly,
