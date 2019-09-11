@@ -57,35 +57,44 @@ train sess proc = ST.evalStateT (ST.evalStateT proc sess) (Statistics 0 0)
 
 
 -- | infer the shapes of input and auxiliary symbols in a symbolic neural network
-inferShapeT :: DType a => Symbol a -> M.HashMap String (NDArray a) -> IO (M.HashMap String [Int], M.HashMap String [Int])
-inferShapeT sym known = do
-    knownShapes <- M.traverseWithKey (\_ -> ndshape) known
-    (inps, _, auxs, complete) <- inferShape sym (M.toList knownShapes)
+inferShape' :: DType a => Symbol a -> M.HashMap String [Int] -> IO (M.HashMap String [Int], M.HashMap String [Int])
+inferShape' sym known = do
+    (args, _, auxs, complete) <- inferShape sym (M.toList known)
     unless complete $ throwM InferredShapeInComplete
-    return (M.fromList inps, M.fromList auxs)
+    return (M.fromList args, M.fromList auxs)
 
 -- | initialize all parameters
 initialize :: DType a => Symbol a -> Config a -> IO (Session a)
 initialize sym config = do
-    let spec1 = M.difference (config ^. cfg_data) (_cfg_initializers config)
-        spec2 = _cfg_initializers config
-        dinit = _cfg_default_initializer config
-        cxt   = _cfg_context config
     -- give a initial batch_size = 1 for the placeholders
-    placeholders  <- mapM (\shp -> makeEmptyNDArray (1:shp) cxt) spec1
-    (inp_with_shp, aux_with_shp) <- inferShapeT sym placeholders
-    inp_args <- M.traverseWithKey (initI placeholders spec2 dinit) inp_with_shp
-    aux_args <- M.traverseWithKey (initA dinit) aux_with_shp
+    let spec1 = M.map (1:) $ M.difference input_shapes initializers
+        spec2 = initializers
+        dinit = config ^. cfg_default_initializer
+        cxt   = config ^. cfg_context
+    (arg_with_shp, aux_with_shp) <- inferShape' sym spec1
+    ---------------------
+    -- important! labels should be merged into placeholders,
+    -- otherwise the labels are considered to have gradient.
+    ---------------------
+    let lbl_with_shp = M.filterWithKey (\k v -> k `elem` label_names) arg_with_shp
+    placeholders <- mapM (flip makeEmptyNDArray cxt) $ M.union spec1 lbl_with_shp
+
+    arg_tensors <- M.traverseWithKey (initI placeholders spec2 dinit) arg_with_shp
+    aux_tensors <- M.traverseWithKey (initA dinit) aux_with_shp
+
     return $ Session {
         _sess_symbol  = sym,
-        _sess_data    = config ^. cfg_data,
-        _sess_label   = config ^. cfg_label,
-        _sess_param   = inp_args `M.union` aux_args,
+        _sess_data    = input_shapes,
+        _sess_label   = label_names,
+        _sess_param   = arg_tensors `M.union` aux_tensors,
         _sess_context = cxt,
         _sess_callbacks = [],
         _sess_store   = M.empty
     }
   where
+    input_shapes = config ^. cfg_data
+    label_names  = config ^. cfg_label
+    initializers = config ^. cfg_initializers
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
     -- other input symbols are initialized by an initializer.
@@ -104,78 +113,15 @@ initialize sym config = do
         arg_aux <- dinit aux shp (_cfg_context config)
         return $ ParameterA arg_aux
 
--- bind' :: (DType a, MonadIO m, MonadThrow m) => Symbol a -> M.HashMap String [Int] -> Bool -> TrainM a m (Executor a)
--- bind' net shapes train_ = do
---     Context{..} <- use sess_context
---     (inp_shps, aux_shps) <- liftIO $ inferShape' net shapes
---     modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p -> do
---         case p of
---             ParameterI {} -> do
---                 let ishp = inp_shps M.! k
---                 param_shp <- liftIO $ ndshape (_param_in p)
---                 param_in_new <- liftIO $ ensure_shape ishp (_param_in p)
---                 param_grad_new <-
---                     if train_ then
---                         liftIO $ mapM (ensure_shape ishp) (_param_grad p)
---                     else
---                         return Nothing
---                 return $! p {_param_in = param_in_new, _param_grad = param_grad_new}
---             ParameterA {} -> do
---                 let ishp = aux_shps M.! k
---                 ashp <- liftIO $ ndshape (_param_aux p)
---                 when (ishp /= ashp ) (throwM $ MismatchedShapeOfSym (k ++ "[i]") ishp ashp)
---                 return p
---     sess_placeholders .= shapes
---     args <- use sess_param
---     exec_handle <- liftIO $ do
---         names <- mxSymbolListArguments (unSymbol net)
---         -- the parameters to bind should be arranged in the same order as the names
---         let num_args = length names
---             arg_in  = map (unNDArray . _param_in) $ map (args M.!) names
---             arg_gr  = if train_
---                         then map (fmap unNDArray . _param_grad) $ map (args M.!) names
---                         else replicate num_args Nothing
---             arg_gr_req = replicate num_args (if train_ then 1 else 0)
-
---         auxnames <- mxSymbolListAuxiliaryStates (unSymbol net)
---         let aux_arg_aux = map (unNDArray . _param_aux) $ map (args M.!) auxnames
---         mxExecutorBind (unSymbol net) _device_type _device_id
---                         arg_in arg_gr arg_gr_req
---                         aux_arg_aux
---     return $ Executor exec_handle
---   where
---     ensure_shape :: DType a => [Int] -> NDArray a -> IO (NDArray a)
---     ensure_shape src_shp ndarray = do
---         dst_cxt <- context ndarray
---         dst_shp <- ndshape ndarray
---         if src_shp == dst_shp
---             then return ndarray
---             else makeEmptyNDArray src_shp dst_cxt
-
--- setPlaceholders :: (DType a, MonadIO m, MonadThrow m) => M.HashMap String (NDArray a) -> TrainM a m ()
--- setPlaceholders values = do
---     params <- use sess_param
---     placeHolders <- use sess_placeholders
---     forM_ (M.toList values) $ \ (key, ndarray_src) -> liftIO $ do
---         case M.lookup key params of
---             Nothing -> throwM $ NotAParameter key
---             Just param -> do
---                 let ndarray_dst = _param_in param
---                 shp_dst <- ndshape ndarray_dst
---                 shp_src <- ndshape ndarray_src
---                 case M.lookup key placeHolders of
---                     Just shp_plc | shp_src /= shp_plc -> throwM $ MismatchedShapeOfSym key shp_src shp_plc
---                     _ -> return ()
---                 when (shp_src /= shp_dst) $ throwM $ MismatchedShapeOfSym key shp_src shp_dst
---                 A._copyto_upd [unNDArray ndarray_dst] (#data := unNDArray ndarray_src .& Nil)
-
 -- | bind the symbolic network with actual parameters
 bind :: (DType a, MonadIO m, MonadThrow m) => M.HashMap String (Maybe (NDArray a)) -> Bool -> TrainM a m (Executor a)
 bind dat train_ = do
     Context{..} <- use sess_context
     net <- use sess_symbol
 
-    (inp_shps, aux_shps) <- liftIO $ inferShapeT net (M.map fromJust $ M.filter isJust dat)
+    let inputs = M.map fromJust $ M.filter isJust dat
+    input_shapes <- liftIO $ mapM ndshape inputs
+    (inp_shps, aux_shps) <- liftIO $ inferShape' net input_shapes
     modifyT . traverseOf sess_param $ M.traverseWithKey $ \k p ->
         case p of
           ParameterI {} -> do
