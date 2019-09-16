@@ -4,8 +4,7 @@ resolver: lts-12.16
 packages:
 - .
 extra-deps:
-- ../mxnet-hs/base
-- ../mxnet-hs/operators
+- ../mxnet-hs/
 - ../tuple-ops
 - git: https://github.com/kylcarte/type-combinators.git
   commit: 071942730b6bb34990d37e1a25236382cf0dcbc6
@@ -16,7 +15,10 @@ extra-deps:
 - graphviz-2999.20.0.2
 - fgl-5.5.4.0
 extra-include-dirs:
-- /home/jiasen/dschungel/incubator-mxnet/include
-- /home/jiasen/dschungel/incubator-mxnet/nnvm/include/
+- /home/jiasen/dschungel/incubator-mxnet-1.5/include
+- /home/jiasen/dschungel/incubator-mxnet-1.5/nnvm/include/
 extra-lib-dirs:
-- /home/jiasen/dschungel/incubator-mxnet/lib
+- /home/jiasen/dschungel/incubator-mxnet-1.5/lib
+flags:
+  mxnet-base:
+    MXNet_1_5: true
