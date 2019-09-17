@@ -1,8 +1,8 @@
-name:                       mxnet-nn
+name:                       fei-nn
 version:                    0.2.0
 synopsis:                   Train a neural network with MXNet in Haskell.
 description:                High level APIs to rain a neural network with MXNet in Haskell.
-homepage:                   http://github.com/pierric/mxnet-nn
+homepage:                   http://github.com/pierric/fei-nn
 license:                    BSD3
 license-file:               LICENSE
 author:                     Jiasen Wu
@@ -36,7 +36,6 @@ Library
     if impl(ghc >= 8.6)
         default-extensions: NoMonadFailDesugaring
     build-depends:          base >= 4.7 && < 5.0
-                          , mxnet-base
                           , unordered-containers >= 0.2.8
                           , resourcet >= 1.1.8
                           , vector >= 0.12
@@ -51,6 +50,7 @@ Library
                           , bytestring >= 0.10
                           , exceptions >= 0.8.3
                           , time < 2.0
+                          , fei-base
 
 Executable lenet
     main-is:                lenet.hs
@@ -59,7 +59,6 @@ Executable lenet
     ghc-options:            -Wall
     default-language:       Haskell2010
     build-depends:          base >= 4.7 && < 5.0
-                          , mxnet-base
                           , unordered-containers >= 0.2.8
                           , attoparsec >= 0.13
                           , attoparsec-binary >= 0.2
@@ -70,4 +69,5 @@ Executable lenet
                           , mmorph >= 1.0.9
                           , mtl >= 2.2.0
                           , ghc-prim
-                          , mxnet-nn
+                          , fei-base
+                          , fei-nn

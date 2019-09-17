@@ -4,7 +4,7 @@ resolver: lts-12.16
 packages:
 - .
 extra-deps:
-- ../mxnet-hs/
+- ../fei-base/
 - ../tuple-ops
 - git: https://github.com/kylcarte/type-combinators.git
   commit: 071942730b6bb34990d37e1a25236382cf0dcbc6
@@ -20,5 +20,5 @@ extra-include-dirs:
 extra-lib-dirs:
 - /home/jiasen/dschungel/incubator-mxnet-1.5/lib
 flags:
-  mxnet-base:
+  fei-base:
     MXNet_1_5: true
