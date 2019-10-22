@@ -1,5 +1,5 @@
 name:                       fei-nn
-version:                    0.2.0
+version:                    0.3.0
 synopsis:                   Train a neural network with MXNet in Haskell.
 description:                High level APIs to rain a neural network with MXNet in Haskell.
 homepage:                   http://github.com/pierric/fei-nn
@@ -10,7 +10,7 @@ maintainer:                 jiasenwu@hotmail.com
 copyright:                  Copyright: (c) 2018 Jiasen Wu
 category:                   Machine Learning, AI
 build-type:                 Simple
-cabal-version:              >= 1.24
+cabal-version:              1.24
 
 Library
     exposed-modules:        MXNet.NN
@@ -24,6 +24,7 @@ Library
                             MXNet.NN.EvalMetric
                             MXNet.NN.Initializer
                             MXNet.NN.Callback
+                            MXNet.NN.TaggedState
                             MXNet.NN.DataIter.Class
                             MXNet.NN.DataIter.Vec
     other-modules:
@@ -50,6 +51,7 @@ Library
                           , bytestring >= 0.10
                           , exceptions >= 0.8.3
                           , time < 2.0
+                          , type-combinators
                           , fei-base
 
 Executable lenet
