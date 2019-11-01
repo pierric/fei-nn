@@ -20,7 +20,8 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State.Class (MonadState)
 import Control.Lens (use, (.=))
 import MXNet.NN.LrScheduler (LrScheduler(..))
-import MXNet.NN.Types (Statistics, stat_num_upd, stat_last_lr)
+import MXNet.NN.TaggedState (Tagged, untag)
+import MXNet.NN.Types (ModuleState, mod_statistics, Statistics, stat_num_upd, stat_last_lr)
 
 -- | Abstract Optimizer type class
 class Optimizer (opt :: * -> *) where
@@ -30,15 +31,15 @@ class Optimizer (opt :: * -> *) where
     -- | Specific optional arguments
     -- type OptArgsList opt :: [KV *]
     -- | make the optimizer
-    makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args) 
+    makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args)
                   => OptimizerTag opt -> sch -> ArgsHMap (OptimizerSym opt) args -> IO (opt dtype)
     -- | run the optimizer with the input & expected tensor
-    optimize :: (DType dtype, MonadIO m, MonadState Statistics m) 
+    optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) IO)
              => opt dtype                            -- optimizer
              -> String                               -- symbol name to optimize
              -> NDArray dytpe                        -- parameter
              -> NDArray dtype                        -- gradient
-             -> m ()
+             -> IO ()
 
 type family OptimizerSym (opt :: * -> *) :: Symbol
 type family OptimizerCst (opt :: * -> *) dt (args :: [*]) :: Constraint
@@ -56,12 +57,12 @@ instance Optimizer SGD_Opt where
     data OptimizerTag SGD_Opt = SGD
     makeOptimizer SGD sch args = return $ SGD_Opt sch args
     optimize (SGD_Opt sch args) _ (NDArray weight) (NDArray gradient) = do
-        nup <- use stat_num_upd
+        nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
-        stat_last_lr .= lr
+        untag . mod_statistics . stat_last_lr .= lr
         liftIO $ A.sgd_update_upd [weight] (
-            #weight := weight   .& 
-            #grad   := gradient .& 
+            #weight := weight   .&
+            #grad   := gradient .&
             #lr     := lr       .& args)
 
 -- | SGD with momentum optimizer
@@ -80,9 +81,9 @@ instance Optimizer SGD_Mom_Opt where
         return $ SGD_Mom_Opt sch args empty
 
     optimize (SGD_Mom_Opt sch args emaref) symbol (NDArray weight) (NDArray gradient) = do
-        nup <- use stat_num_upd
+        nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
-        stat_last_lr .= lr
+        untag . mod_statistics . stat_last_lr .= lr
         liftIO $ do
             ema <- readIORef emaref
             momentum <- case M.lookup symbol ema of
@@ -92,14 +93,14 @@ instance Optimizer SGD_Mom_Opt where
                     return mom
                 Just (NDArray a) -> return a
             A.sgd_mom_update_upd [weight] (
-                #weight := weight   .& 
-                #grad   := gradient .& 
-                #mom    := momentum .& 
+                #weight := weight   .&
+                #grad   := gradient .&
+                #mom    := momentum .&
                 #lr     := lr       .& args)
 
 -- | ADAM optmizer
 data ADAM_Opt dtype where
-    ADAM_Opt :: (LrScheduler sch, OptimizerCst ADAM_Opt dtype args) 
+    ADAM_Opt :: (LrScheduler sch, OptimizerCst ADAM_Opt dtype args)
             => sch -> ArgsHMap (OptimizerSym ADAM_Opt) args -> IORef (M.HashMap String (NDArray dtype, NDArray dtype)) -> ADAM_Opt dtype
 
 type instance OptimizerSym ADAM_Opt = "adam_update(ndarray)"
@@ -113,9 +114,9 @@ instance Optimizer ADAM_Opt where
         return $ ADAM_Opt sch args empty
 
     optimize (ADAM_Opt sch args emaref) symbol (NDArray weight) (NDArray gradient) = do
-        nup <- use stat_num_upd
+        nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
-        stat_last_lr .= lr
+        untag . mod_statistics . stat_last_lr .= lr
         liftIO $ do
             ema <- readIORef emaref
             (moving_avg, moving_var) <- case M.lookup symbol ema of
