@@ -16,6 +16,7 @@ Library
     exposed-modules:        MXNet.NN
                             MXNet.NN.NDArray
                             MXNet.NN.Types
+                            MXNet.NN.Session
                             MXNet.NN.Utils
                             MXNet.NN.Utils.GraphViz
                             MXNet.NN.Layer
@@ -23,7 +24,7 @@ Library
                             MXNet.NN.LrScheduler
                             MXNet.NN.EvalMetric
                             MXNet.NN.Initializer
-                            -- MXNet.NN.Callback
+                            MXNet.NN.Callback
                             MXNet.NN.TaggedState
                             MXNet.NN.Module
                             MXNet.NN.DataIter.Class

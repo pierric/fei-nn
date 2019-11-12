@@ -1,18 +1,18 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DataKinds, TypeOperators #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE PolyKinds #-}
 module MXNet.NN.TaggedState where
 
-import GHC.TypeLits (Symbol)
+import qualified GHC.TypeLits as L
 import Data.Type.Product
 import Data.Type.Index
 import Control.Monad.State.Strict (StateT(..))
 import Control.Lens (makeLenses)
+import Data.Proxy (Proxy(..))
 
-newtype Tagged a (t :: Symbol) = Tagged {_untag :: a} deriving Show
+newtype Tagged a (t :: L.Symbol) = Tagged {_untag :: a} deriving Show
 makeLenses ''Tagged
 
 liftSub :: forall k (f :: k -> *) s1 s2 m a. (Elem s2 s1, Monad m) => StateT (f s1) m a -> StateT (Prod f s2) m a
@@ -26,6 +26,8 @@ modify :: Index as a -> f a -> Prod f as -> Prod f as
 modify IZ new (_ :< remainder) = new :< remainder
 modify (IS s) new (first :< remainder) = first :< modify s new remainder
 
+toPair :: forall t a. L.KnownSymbol t => Tagged a t -> (String, a)
+toPair (Tagged a)= (L.symbolVal (Proxy :: Proxy t), a)
 
 
 -- a1 :: StateT (Tagged Int "A") IO ()

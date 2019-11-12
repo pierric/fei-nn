@@ -16,6 +16,7 @@ import MXNet.Base (
     Executor, execForward, execBackward, execGetOutputs, execReshapeEx, execBind,
     waitAll)
 import MXNet.NN.Types
+import MXNet.NN.Session
 import MXNet.NN.TaggedState (Tagged(..), untag)
 import MXNet.NN.Optimizer (Optimizer, optimize)
 
