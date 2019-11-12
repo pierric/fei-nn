@@ -2,12 +2,13 @@ module MXNet.NN.Module where
 
 import qualified Data.HashMap.Strict as M
 import qualified Data.HashSet as S
-import Control.Arrow (second, Kleisli(..))
-import Control.Lens.Setter ((.=), (+=))
+import Text.Printf
+import Control.Lens.Setter ((.=), (+=), (%=))
 import Control.Lens.Getter (use, (^.))
-import Control.Monad (when, forM_)
+import Control.Monad (when, forM_, void)
 import Control.Monad.Trans (lift)
 import Control.Exception (assert)
+import Control.Monad.Trans.Resource (MonadThrow(..))
 
 import MXNet.Base (
     DType, Context,
@@ -18,6 +19,9 @@ import MXNet.Base (
 import MXNet.NN.Types
 import MXNet.NN.TaggedState (Tagged(..), untag)
 import MXNet.NN.Optimizer (Optimizer, optimize)
+import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..), DatasetConstraint)
+import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
+import MXNet.NN.Utils (printInLine)
 
 initialize :: forall tag dty. DType dty => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
@@ -34,7 +38,7 @@ initialize symbol config = do
     -- important! labels should be merged into placeholders,
     -- otherwise the labels are considered to have gradient.
     ---------------------
-    let lbl_with_shp = M.filterWithKey (\k v -> k `elem` label_names) arg_with_shp
+    let lbl_with_shp = M.filterWithKey (\k _ -> k `elem` label_names) arg_with_shp
     placeholders <- mapM (flip makeEmptyNDArray cxt) $ M.union spec1 lbl_with_shp
 
     arg_tensors <- M.traverseWithKey (initI placeholders spec2 dinit) arg_with_shp
@@ -49,7 +53,8 @@ initialize symbol config = do
         _mod_params       = params,
         _mod_context      = cxt,
         _mod_executor     = executor,
-        _mod_statistics    = Statistics 0 0
+        _mod_statistics   = Statistics 0 0,
+        _mod_scores       = M.empty
     }
   where
     input_shapes = config ^. cfg_data
@@ -136,3 +141,61 @@ update opt blacklist = do
     lift waitAll
 
 
+fitAndEval :: forall tag dty opt mtr. (DType dty, Optimizer opt, EvalMetricMethod mtr)
+           => opt dty -> M.HashMap String (NDArray dty) -> MetricData mtr dty -> Module tag dty ()
+fitAndEval opt datAndLbl metric = do
+    fit datAndLbl
+    update opt M.empty
+    exec <- use (untag . mod_executor)
+    out  <- lift $ execGetOutputs exec
+    eval_results <- evaluate metric datAndLbl out
+    untag . mod_scores %= M.union eval_results
+
+
+fitDataset :: (Dataset d, DatasetProp d e, DType a,
+        DatasetConstraint d (Module t a),
+        Optimizer opt, EvalMetricMethod mtr)
+    => d e
+    -> d e
+    -> ([String] -> e -> M.HashMap String (NDArray a))
+    -> opt a
+    -> mtr a
+    -> Int
+    -> Module t a ()
+fitDataset trainDataset valDataset make_binding opt metric epochs = do
+    -- callbacks <- use sess_callbacks
+
+    vars <- M.keys <$> use (untag . mod_input_shapes)
+
+    total     <- sizeD trainDataset
+    batchSize <- batchSizeD trainDataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
+
+    lift $ putStrLn $ "[Train]"
+    forM_ (enumFromTo 1 epochs) $ \epochInd -> do
+        trainMetricData <- newMetric "train" metric
+
+        lift $ putStrLn $ "epoch " ++ show epochInd
+        -- forM_ callbacks (begOfEpoch epochInd total)
+
+        void $ forEachD_i trainDataset $ \(i, item) -> do
+            -- forM_ callbacks (begOfBatch i batchSize)
+            let binding = make_binding vars item
+            fitAndEval opt binding trainMetricData
+            eval <- format trainMetricData
+            lift $ printInLine $ printf "%d%%d %s" i total eval
+            -- forM_ callbacks (endOfBatch i batchSize)
+
+        -- forM_ callbacks (endOfEpoch epochInd total)
+
+        lift $ putStrLn "\n[Validate]"
+        valMetricData <- newMetric "val" metric
+        void $ forEachD valDataset $ \item -> do
+            let binding = make_binding vars item
+            -- TODO: it is bad to pass labels to forwardOnly
+            pred <- forwardOnly binding
+            evaluate valMetricData binding pred
+        eval <- format valMetricData
+        lift $ putStrLn eval
+
+        -- forM_ callbacks (endOfVal epochInd total)
+        lift $ putStrLn ""

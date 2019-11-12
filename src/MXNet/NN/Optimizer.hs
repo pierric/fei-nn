@@ -21,7 +21,7 @@ import Control.Monad.State.Class (MonadState)
 import Control.Lens (use, (.=))
 import MXNet.NN.LrScheduler (LrScheduler(..))
 import MXNet.NN.TaggedState (Tagged, untag)
-import MXNet.NN.Types (ModuleState, mod_statistics, Statistics, stat_num_upd, stat_last_lr)
+import MXNet.NN.Types (TaggedModuleState, mod_statistics, Statistics, stat_num_upd, stat_last_lr)
 
 -- | Abstract Optimizer type class
 class Optimizer (opt :: * -> *) where
@@ -34,12 +34,12 @@ class Optimizer (opt :: * -> *) where
     makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args)
                   => OptimizerTag opt -> sch -> ArgsHMap (OptimizerSym opt) args -> IO (opt dtype)
     -- | run the optimizer with the input & expected tensor
-    optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) IO)
+    optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) m, MonadIO m)
              => opt dtype                            -- optimizer
              -> String                               -- symbol name to optimize
              -> NDArray dytpe                        -- parameter
              -> NDArray dtype                        -- gradient
-             -> IO ()
+             -> m ()
 
 type family OptimizerSym (opt :: * -> *) :: Symbol
 type family OptimizerCst (opt :: * -> *) dt (args :: [*]) :: Constraint

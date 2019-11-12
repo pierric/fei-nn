@@ -4,12 +4,9 @@ module MXNet.NN.DataIter.Vec where
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
-import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
--- import Control.Monad.Trans.Resource (MonadThrow(..))
 
 import MXNet.NN.DataIter.Class
-import MXNet.NN.Types
 import MXNet.Base (NDArray, DType, ndshape)
 
 newtype DatasetVector a = DatasetVector { _dsv_unwrap :: Vector a }

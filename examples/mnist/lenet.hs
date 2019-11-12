@@ -1,21 +1,20 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE TypeApplications #-}
 module Main where
 
 import Control.Monad (forM_, void)
 import qualified Data.Vector.Storable as SV
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Resource
-import System.IO (hFlush, stdout)
 import qualified Data.HashMap.Strict as M
 
-import MXNet.Base hiding (zeros)
+import MXNet.Base (
+    Symbol(..), NDArray(..), ArgOf(..), HMap(..), (.&), 
+    mxListAllOpNames, contextCPU, contextGPU0, toVector)
 import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN
 import MXNet.NN.DataIter.Class
-import qualified MXNet.NN.Utils.GraphViz as GV
 
 import DatasetVector
 
@@ -36,8 +35,8 @@ import DatasetVector
 -- # loss
 -- lenet = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')
 
-neural :: IO SymbolF
-neural = do
+model :: IO SymbolF
+model = do
     x  <- variable "x"
     y  <- variable "y"
 
@@ -70,44 +69,43 @@ main :: IO ()
 main = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized
     -- i.e. MXNet operators are registered in the NNVM
-    _    <- mxListAllOpNames
-    net  <- neural
-    -- GV.dotPlot net GV.Png "lenet"
-    sess <- initialize net $ Config { 
-                _cfg_data = M.singleton "x" [1,28,28],
-                _cfg_label = ["y"],
-                _cfg_initializers = M.empty,
-                _cfg_default_initializer = default_initializer,
-                _cfg_context = contextCPU
-            }
+    _      <- mxListAllOpNames
+    symbol <- model
+
+    trainingData <- loadTrainingData
+    testingData  <- loadTestingData
+
     optimizer <- makeOptimizer SGD'Mom (Const 0.0002) (#momentum := 0.9 .& #wd := 0.0001 .& Nil)
 
-    runResourceT $ train sess $ do 
+    mod <- initialize @"lenet" symbol $ Config {
+               _cfg_data = M.singleton "x" [1,28,28],
+               _cfg_label = ["y"],
+               _cfg_initializers = M.empty,
+               _cfg_default_initializer = default_initializer,
+               _cfg_context = contextGPU0
+           }
 
-        trainingData <- loadTrainingData
-        testingData  <- loadTestingData
-
+    train mod $ do
         liftIO $ putStrLn $ "[Train] "
-        forM_ (range 5) $ \ind -> do
+        forM_ (range 1) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
-            metric <- newMetric "train" (CrossEntropy "y")
+            -- metric <- newMetric "train" (CrossEntropy "y")
             void $ forEachD_ni trainingData $ \((t,i), (x, y)) -> do
-                eval <- format metric
-                liftIO $ putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t ++ " " ++ eval
-                liftIO $ hFlush stdout
-                fitAndEval optimizer (M.fromList [("x", x), ("y", y)]) metric
+                -- eval <- format metric
+                liftIO $ printInLine $ show i ++ "/" ++ show t -- ++ " " ++ eval
+                fit (M.fromList [("x", x), ("y", y)])
+                update optimizer M.empty
             liftIO $ putStrLn ""
-        
+
         liftIO $ putStrLn $ "[Test] "
-        result <- forEachD_ni testingData $ \((t,i), (x, y)) -> do 
-            liftIO $ do 
-                putStr $ "\r\ESC[K" ++ show i ++ "/" ++ show t
-                hFlush stdout
-            [y'] <- forwardOnly (M.fromList [("x", Just x), ("y", Nothing)])
-            ind1 <- liftIO $ toVector y
-            ind2 <- liftIO $ argmax y' >>= toVector
-            return (ind1, ind2)
-        liftIO $ putStr "\r\ESC[K"
+        result <- forEachD_ni testingData $ \((t,i), (x, y)) -> do
+            liftIO $ printInLine $ show i ++ "/" ++ show t
+            [y'] <-  forwardOnly (M.fromList [("x", x), ("y", y)])
+            liftIO $ do
+                y_true <- toVector y
+                y_pred <- argmax y' >>= toVector
+                return (y_true, y_pred)
+        liftIO $ putStrLn ""
 
         let (ls,ps) = unzip result
             ls_unbatched = mconcat ls
@@ -115,7 +113,7 @@ main = do
             total_test_items = SV.length ls_unbatched
             correct = SV.length $ SV.filter id $ SV.zipWith (==) ls_unbatched ps_unbatched
         liftIO $ putStrLn $ "Accuracy: " ++ show correct ++ "/" ++ show total_test_items
-  
+
   where
     argmax :: ArrayF -> IO ArrayF
     argmax (NDArray ys) = NDArray . head <$> A.argmax (#data := ys .& #axis := Just 1 .& Nil)
