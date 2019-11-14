@@ -7,13 +7,11 @@ import qualified Control.Monad.State.Strict as ST
 import qualified GHC.TypeLits as L
 import qualified Data.Type.Product as DT
 import qualified Data.Type.Index as DT
-import qualified Type.Class.Higher as DT
-import qualified Type.Family.List as DT
 import qualified Data.HashMap.Strict as M
 import Data.Kind (Constraint)
-import Control.Lens (makeLenses, use, (^.))
+import Control.Lens ((^.))
 import Control.Monad (when)
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.IO.Class (MonadIO)
 
 import MXNet.Base
 import MXNet.NN.Types (Module, ModuleSet, ModuleState, TaggedModuleState, Parameter(..), mod_params, mod_symbol)
@@ -25,8 +23,6 @@ class MonadIO sess => Session sess where
     type SessionHasModule sess (t :: L.Symbol) a :: Constraint
 
     train :: SessionState sess -> sess r -> IO r
-    loadSession :: String -> String -> [String] -> sess ()
-    saveSession :: (String -> String) -> Bool -> sess ()
     runModule :: SessionHasModule sess t a => Module t a r -> sess r
     getStates :: sess [(String, ModuleState (SessionDType sess))]
 
@@ -49,8 +45,6 @@ instance L.KnownSymbol t => Session (Module t a) where
     train = flip ST.evalStateT
     runModule = id
     getStates = (:[]) . toPair <$> ST.get
-    loadSession = loadStates
-    saveSession = saveStates
 
 class CallbackClass c where
     begOfBatch :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()

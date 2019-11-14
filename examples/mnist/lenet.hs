@@ -14,7 +14,6 @@ import MXNet.Base (
     mxListAllOpNames, contextCPU, contextGPU0, toVector)
 import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN
-import MXNet.NN.DataIter.Class
 
 import DatasetVector
 

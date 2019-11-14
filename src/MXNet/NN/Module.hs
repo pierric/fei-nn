@@ -17,7 +17,6 @@ import MXNet.Base (
     Executor, execForward, execBackward, execGetOutputs, execReshapeEx, execBind,
     waitAll)
 import MXNet.NN.Types
-import MXNet.NN.Session
 import MXNet.NN.TaggedState (Tagged(..), untag)
 import MXNet.NN.Optimizer (Optimizer, optimize)
 import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..), DatasetConstraint)
@@ -193,8 +192,8 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
         void $ forEachD valDataset $ \item -> do
             let binding = make_binding vars item
             -- TODO: it is bad to pass labels to forwardOnly
-            pred <- forwardOnly binding
-            evaluate valMetricData binding pred
+            out <- forwardOnly binding
+            evaluate valMetricData binding out
         eval <- format valMetricData
         lift $ putStrLn eval
 

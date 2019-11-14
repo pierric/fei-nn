@@ -10,7 +10,8 @@ module MXNet.NN (
     module MXNet.NN.Utils,
     module MXNet.NN.TaggedState,
     module MXNet.NN.Session,
-     module MXNet.NN.Callback,
+    module MXNet.NN.Callback,
+    module MXNet.NN.DataIter.Class,
 ) where
 
 import MXNet.NN.Module
