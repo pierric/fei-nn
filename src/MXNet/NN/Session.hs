@@ -49,6 +49,8 @@ instance L.KnownSymbol t => Session (Module t a) where
     train = flip ST.evalStateT
     runModule = id
     getStates = (:[]) . toPair <$> ST.get
+    loadSession = loadStates
+    saveSession = saveStates
 
 class CallbackClass c where
     begOfBatch :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()
@@ -82,4 +84,3 @@ saveState save_symbol name state = do
   where
     getModelParam (key, ParameterI a _) = ("arg:" ++ key, unNDArray a)
     getModelParam (key, ParameterA a) = ("aux:" ++ key, unNDArray a)
-
