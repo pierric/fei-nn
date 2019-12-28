@@ -13,9 +13,11 @@ import Control.Monad.Trans.Resource (MonadThrow(..))
 import MXNet.Base (
     DType, Context,
     Symbol, listArguments, listAuxiliaryStates, inferShape,
-    NDArray, ndshape, makeEmptyNDArray,
+    NDArray(..), ndshape, makeEmptyNDArray,
     Executor, execForward, execBackward, execGetOutputs, execReshapeEx, execBind,
-    waitAll)
+    waitAll,
+    (.&), ArgOf(..), HMap(..))
+import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 import MXNet.NN.TaggedState (Tagged(..), untag)
 import MXNet.NN.Optimizer (Optimizer, optimize)
@@ -81,7 +83,7 @@ initialize symbol config = do
 bind :: DType dty => Symbol dty -> Context -> M.HashMap String (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
-    auxnames <- listAuxiliaryStates symbol 
+    auxnames <- listAuxiliaryStates symbol
     -- sanity check
     assert (M.keysSet params == S.fromList (argnames ++ auxnames)) (return ())
     -- the parameters to bind should be arranged in the same order as the argnames
@@ -104,6 +106,7 @@ adapt inputs = do
     shapes  <- use $ untag . mod_input_shapes
     shapes' <- lift $ mapM ndshape inputs
 
+    -- reshape the executor (and arg, aux arrays)
     when (shapes /= shapes') $ do
         (args, grads, auxs, exec) <- lift $ execReshapeEx exec True True context (M.toList shapes')
         arg_names <- lift $ listArguments symbol
@@ -113,6 +116,13 @@ adapt inputs = do
         untag . mod_executor .= exec
         untag . mod_input_shapes   .= shapes'
         untag . mod_params   .= M.union arg_ndarrs aux_ndarrs
+
+    -- copy the ndarray
+    targets <- use $ untag . mod_params
+    forM_ (M.toList inputs) $ \ (k, src) -> lift $ do
+        case M.lookup k targets of
+          Just (ParameterI dst _) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
+          _ -> return ()
 
 forwardOnly :: forall tag dty. DType dty => M.HashMap String (NDArray dty) -> Module tag dty [NDArray dty]
 forwardOnly inputs = do
