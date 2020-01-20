@@ -6,13 +6,15 @@
 module MXNet.NN.Utils where
 
 import System.IO (hFlush, stdout)
-import Data.List (intersperse)
+import Data.List (intersperse, sortOn)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as M
 import Control.Lens (use)
 import Control.Monad (when, forM_)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
+import System.Directory (listDirectory, getModificationTime)
+import System.FilePath ((</>))
 import Text.Printf
 
 import MXNet.Base (Context(..), NDArray(..), Symbol(..), (.&), ArgOf(..), HMap(..))
@@ -40,13 +42,13 @@ endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
 
 -- class Session s where
 --     saveSession :: (String -> String) -> Bool -> ST.StateT s IO ()
--- 
+--
 -- instance L.KnownSymbol tag => Session (TaggedModuleState a tag) where
 --     saveSession make_filename save_symbol = do
 --         st <- ST.get
 --         let name = L.symbolVal (Proxy :: Proxy tag)
 --         liftIO $ saveState save_symbol (make_filename name) (st ^. untag)
--- 
+--
 -- instance DT.Every L.KnownSymbol tags => Session (DT.Prod (TaggedModuleState a) tags) where
 --     saveSession make_filename save_symbol = do
 --         tagged_states <- ST.get
@@ -59,7 +61,7 @@ endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
 --         toNames (v DT.:< rem) = L.symbolVal v : toNames rem
 
 
-saveStates :: Bool -> String -> Module t a ()
+saveStates :: MonadIO m => Bool -> String -> Module t a m ()
 saveStates save_symbol name = do
     params <- use (untag . mod_params)
     symbol <- use (untag . mod_symbol)
@@ -71,11 +73,11 @@ saveStates save_symbol name = do
     getModelParam (key, ParameterI a _) = ("arg:" ++ key, unNDArray a)
     getModelParam (key, ParameterA a) = ("aux:" ++ key, unNDArray a)
 
-loadStates :: String -> [String] -> Module t a ()
+loadStates :: MonadIO m => String -> [String] -> Module t a m ()
 loadStates weights_filename ignores = do
     arrays <- liftIO $ mxNDArrayLoad (weights_filename ++ ".params")
     params <- use (untag . mod_params)
-    liftIO $ forM_ arrays $ \(name, hdl) ->
+    liftIO $ forM_ arrays $ \(name, hdl) -> do
         case break (==':') name of
             (typ, ':':key) | typ /= ""->
                 case (key `elem` ignores, typ, M.lookup key params) of
@@ -86,6 +88,16 @@ loadStates weights_filename ignores = do
                     _ -> throwM (LoadSessionMismatchedTensorKind name)
             _ -> throwM (LoadSessionInvalidTensorName name)
 
+lastSavedState :: MonadIO m => String -> Module t a m (Maybe FilePath)
+lastSavedState dir = liftIO $ do
+    files <- listDirectory dir
+    let param_files = filter (endsWith ".params") files
+    if null param_files
+        then return Nothing
+        else do
+            mod_time <- mapM (getModificationTime . (dir </>)) param_files
+            let latest = fst $ last $ sortOn snd (zip param_files mod_time)
+            return $ Just $ dir </> latest
 
 printInLine :: String -> IO ()
 printInLine str = do

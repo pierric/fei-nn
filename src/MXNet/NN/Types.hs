@@ -51,8 +51,8 @@ data Exc = MismatchedShapeOfSym String [Int] [Int]
 instance Exception Exc
 
 type TaggedModuleState a = Tagged (ModuleState a)
-type Module tag a = ST.StateT (TaggedModuleState a tag) IO
-type ModuleSet tags a = ST.StateT (DT.Prod (TaggedModuleState a) tags) IO
+type Module tag a m = ST.StateT (TaggedModuleState a tag) m
+type ModuleSet tags a m = ST.StateT (DT.Prod (TaggedModuleState a) tags) m
 
 data ModuleState a = ModuleState {
       _mod_symbol       :: Symbol a

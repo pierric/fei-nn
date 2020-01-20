@@ -10,6 +10,7 @@ module MXNet.NN.DataIter.Streaming (
 import Streaming
 import Streaming.Prelude (Of(..), yield, length_, toList_)
 import qualified Streaming.Prelude as S
+import Control.Monad.Trans (lift)
 
 import MXNet.Base
 import qualified MXNet.Base.DataIter as I
@@ -63,15 +64,15 @@ makeIter creator args = do
                       loop
     loop
 
-type instance DatasetConstraint (StreamData m1) m2 = m1 ~ m2
-
-instance Monad m => Dataset (StreamData m) where
+instance Dataset StreamData where
+    type DatasetMonadConstraint StreamData m = ()
     fromListD = StreamData Nothing . S.each
     zipD s1 s2 = StreamData Nothing $ S.zip (getStream s1) (getStream s2)
     sizeD = length_ . getStream
     forEachD dat proc = toList_ $ void $ S.mapM proc (getStream dat)
     foldD proc elem dat = S.foldM_ proc (return elem) return (getStream dat)
     takeD n dat = dat { getStream = S.take n (getStream dat) }
+    liftD dat = dat { getStream = hoist lift (getStream dat) }
 
-instance DatasetProp (StreamData m) a where
+instance DatasetProp StreamData a where
     batchSizeD = return . iter_batch_size

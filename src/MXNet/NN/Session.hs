@@ -20,16 +20,18 @@ import MXNet.NN.TaggedState (liftSub, toPair)
 class MonadIO sess => Session sess where
     type SessionDType sess
     type SessionState sess
+    type SessionMonad sess :: * -> *
     type SessionHasModule sess (t :: L.Symbol) a :: Constraint
 
-    train :: SessionState sess -> sess r -> IO r
-    runModule :: SessionHasModule sess t a => Module t a r -> sess r
+    train :: SessionState sess -> sess r -> SessionMonad sess r
+    runModule :: SessionHasModule sess t a => Module t a (SessionMonad sess) r -> sess r
     getStates :: sess [(String, ModuleState (SessionDType sess))]
 
-instance DT.Every L.KnownSymbol t => Session (ModuleSet t a) where
-    type SessionDType (ModuleSet t a) = a
-    type SessionState (ModuleSet t a) = DT.Prod (TaggedModuleState a) t
-    type SessionHasModule (ModuleSet t a) t' a' = (DT.Elem t t', a ~ a')
+instance (DT.Every L.KnownSymbol t, MonadIO m) => Session (ModuleSet t a m) where
+    type SessionDType (ModuleSet t a m) = a
+    type SessionState (ModuleSet t a m) = DT.Prod (TaggedModuleState a) t
+    type SessionMonad (ModuleSet t a m) = m
+    type SessionHasModule (ModuleSet t a m) t' a' = (DT.Elem t t', a ~ a')
     train = flip ST.evalStateT
     runModule = liftSub
     getStates = walk <$> ST.get
@@ -38,24 +40,25 @@ instance DT.Every L.KnownSymbol t => Session (ModuleSet t a) where
         walk DT.Ø = []
         walk (v DT.:< rem) = toPair v : walk rem
 
-instance L.KnownSymbol t => Session (Module t a) where
-    type SessionDType (Module t a) = a
-    type SessionState (Module t a) = TaggedModuleState a t
-    type SessionHasModule (Module t a) t' a' = (t ~ t', a ~ a')
+instance (L.KnownSymbol t, MonadIO m) => Session (Module t a m) where
+    type SessionDType (Module t a m) = a
+    type SessionState (Module t a m) = TaggedModuleState a t
+    type SessionMonad (Module t a m) = m
+    type SessionHasModule (Module t a m) t' a' = (t ~ t', a ~ a')
     train = flip ST.evalStateT
     runModule = id
     getStates = (:[]) . toPair <$> ST.get
 
 class CallbackClass c where
-    begOfBatch :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()
+    begOfBatch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
     begOfBatch _ _ _ = return ()
-    endOfBatch :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()
+    endOfBatch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
     endOfBatch _ _ _ = return ()
-    begOfEpoch :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()
+    begOfEpoch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
     begOfEpoch _ _ _ = return ()
-    endOfEpoch :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()
+    endOfEpoch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
     endOfEpoch _ _ _ = return ()
-    endOfVal   :: (L.KnownSymbol t, DType a) => Int -> Int -> c -> Module t a ()
+    endOfVal   :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
     endOfVal   _ _ _ = return ()
 data Callback where
     Callback :: CallbackClass a => a -> Callback

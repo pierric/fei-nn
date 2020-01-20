@@ -6,7 +6,7 @@ import Text.Printf
 import Control.Lens.Setter ((.=), (+=), (%=))
 import Control.Lens.Getter (use, (^.))
 import Control.Monad (when, forM_, void)
-import Control.Monad.Trans (lift)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Exception (assert)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 
@@ -21,7 +21,7 @@ import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 import MXNet.NN.TaggedState (Tagged(..), untag)
 import MXNet.NN.Optimizer (Optimizer, optimize)
-import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..), DatasetConstraint)
+import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..))
 import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
 import MXNet.NN.Utils (printInLine)
 
@@ -96,7 +96,7 @@ bind symbol context params trainable = do
         aux_arg_aux  = map (_param_aux . (params M.!)) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
-adapt :: DType dty => M.HashMap String (NDArray dty) -> Module tag dty ()
+adapt :: (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m ()
 adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
@@ -104,13 +104,13 @@ adapt inputs = do
     -- shapes  <- M.toList <$> use mod_input_shapes
     -- shapes' <- lift $ mapM (runKleisli $ second $ Kleisli ndshape) $ M.toList inputs
     shapes  <- use $ untag . mod_input_shapes
-    shapes' <- lift $ mapM ndshape inputs
+    shapes' <- liftIO $ mapM ndshape inputs
 
     -- reshape the executor (and arg, aux arrays)
     when (shapes /= shapes') $ do
-        (args, grads, auxs, exec) <- lift $ execReshapeEx exec True True context (M.toList shapes')
-        arg_names <- lift $ listArguments symbol
-        aux_names <- lift $ listAuxiliaryStates symbol
+        (args, grads, auxs, exec) <- liftIO $ execReshapeEx exec True True context (M.toList shapes')
+        arg_names <- liftIO $ listArguments symbol
+        aux_names <- liftIO $ listAuxiliaryStates symbol
         let arg_ndarrs = M.fromList $ zip arg_names $ map (uncurry ParameterI) (zip args grads)
             aux_ndarrs = M.fromList $ zip aux_names $ map ParameterA auxs
         untag . mod_executor .= exec
@@ -119,28 +119,28 @@ adapt inputs = do
 
     -- copy the ndarray
     targets <- use $ untag . mod_params
-    forM_ (M.toList inputs) $ \ (k, src) -> lift $ do
+    forM_ (M.toList inputs) $ \ (k, src) -> liftIO $ do
         case M.lookup k targets of
           Just (ParameterI dst _) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
           _ -> return ()
 
-forwardOnly :: forall tag dty. DType dty => M.HashMap String (NDArray dty) -> Module tag dty [NDArray dty]
+forwardOnly :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m [NDArray dty]
 forwardOnly inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
-    lift $ do
+    liftIO $ do
         execForward exec False
         execGetOutputs exec
 
-fit :: forall tag dty. DType dty => M.HashMap String (NDArray dty) -> Module tag dty ()
+fit :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m ()
 fit inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
-    lift $ do
+    liftIO $ do
         execForward exec True
         execBackward exec []
 
-update :: forall tag dty opt any. (Optimizer opt, DType dty) => opt dty -> M.HashMap String any -> Module tag dty ()
+update :: forall tag dty opt m any. (Optimizer opt, DType dty, MonadIO m) => opt dty -> M.HashMap String any -> Module tag dty m ()
 update opt blacklist = do
     params <- use (untag . mod_params)
     forM_ (M.toList params) $ \case
@@ -148,30 +148,30 @@ update opt blacklist = do
             optimize opt k weig grad
         _ -> return ()
     untag . mod_statistics . stat_num_upd += 1
-    lift waitAll
+    liftIO waitAll
 
 
-fitAndEval :: forall tag dty opt mtr. (DType dty, Optimizer opt, EvalMetricMethod mtr)
-           => opt dty -> M.HashMap String (NDArray dty) -> MetricData mtr dty -> Module tag dty ()
+fitAndEval :: forall tag dty opt mtr m. (DType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
+           => opt dty -> M.HashMap String (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
 fitAndEval opt datAndLbl metric = do
     fit datAndLbl
     update opt M.empty
     exec <- use (untag . mod_executor)
-    out  <- lift $ execGetOutputs exec
+    out  <- liftIO $ execGetOutputs exec
     eval_results <- evaluate metric datAndLbl out
     untag . mod_scores %= M.union eval_results
 
 
-fitDataset :: (Dataset d, DatasetProp d e, DType a,
-        DatasetConstraint d (Module t a),
+fitDataset :: (Dataset d, DatasetProp d e, DType a, MonadIO m, MonadThrow m,
+        DatasetMonadConstraint d (Module t a m),
         Optimizer opt, EvalMetricMethod mtr)
-    => d e
-    -> d e
+    => d (Module t a m) e
+    -> d (Module t a m) e
     -> ([String] -> e -> M.HashMap String (NDArray a))
     -> opt a
     -> mtr a
     -> Int
-    -> Module t a ()
+    -> Module t a m ()
 fitDataset trainDataset valDataset make_binding opt metric epochs = do
     -- callbacks <- use sess_callbacks
 
@@ -180,11 +180,11 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
     total     <- sizeD trainDataset
     batchSize <- batchSizeD trainDataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
 
-    lift $ putStrLn $ "[Train]"
+    liftIO $ putStrLn $ "[Train]"
     forM_ (enumFromTo 1 epochs) $ \epochInd -> do
         trainMetricData <- newMetric "train" metric
 
-        lift $ putStrLn $ "epoch " ++ show epochInd
+        liftIO $ putStrLn $ "epoch " ++ show epochInd
         -- forM_ callbacks (begOfEpoch epochInd total)
 
         void $ forEachD_i trainDataset $ \(i, item) -> do
@@ -192,12 +192,12 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
             let binding = make_binding vars item
             fitAndEval opt binding trainMetricData
             eval <- format trainMetricData
-            lift $ printInLine $ printf "%d%%d %s" i total eval
+            liftIO $ printInLine $ printf "%d%%d %s" i total eval
             -- forM_ callbacks (endOfBatch i batchSize)
 
         -- forM_ callbacks (endOfEpoch epochInd total)
 
-        lift $ putStrLn "\n[Validate]"
+        liftIO $ putStrLn "\n[Validate]"
         valMetricData <- newMetric "val" metric
         void $ forEachD valDataset $ \item -> do
             let binding = make_binding vars item
@@ -205,7 +205,7 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
             out <- forwardOnly binding
             evaluate valMetricData binding out
         eval <- format valMetricData
-        lift $ putStrLn eval
+        liftIO $ putStrLn eval
 
         -- forM_ callbacks (endOfVal epochInd total)
-        lift $ putStrLn ""
+        liftIO $ putStrLn ""

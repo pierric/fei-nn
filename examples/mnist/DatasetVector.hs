@@ -3,7 +3,6 @@ module DatasetVector where
 import MXNet.Base (Symbol, NDArray, makeNDArray, contextCPU)
 import Data.Typeable
 import Control.Monad.Trans.Resource (MonadThrow(..))
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad (liftM2)
 import Control.Exception.Base
 import qualified Data.Vector as V
@@ -18,36 +17,36 @@ import Parse
 type SymbolF = Symbol Float
 type ArrayF  = NDArray Float
 
-loadTrainingData :: IO (DatasetVector (ArrayF, ArrayF))
+loadTrainingData :: IO (DatasetVector IO (ArrayF, ArrayF))
 loadTrainingData = do
     v1 <- batch 128 <$> sourceImages "examples/data/train-images-idx3-ubyte"
     v2 <- batch 128 <$> sourceLabels "examples/data/train-labels-idx1-ubyte"
-    liftIO $ liftM2 zipD (mapMD cImageToNDArray v1) (mapMD cLabelToNDArray v2)
+    liftM2 zipD (mapMD cImageToNDArray v1) (mapMD cLabelToNDArray v2)
 
-loadTestingData :: IO (DatasetVector (ArrayF, ArrayF))
+loadTestingData :: IO (DatasetVector IO (ArrayF, ArrayF))
 loadTestingData = do
     v1 <- batch 100 <$> sourceImages "examples/data/t10k-images-idx3-ubyte"
     v2 <- batch 100 <$> sourceLabels "examples/data/t10k-labels-idx1-ubyte"
-    liftIO $ liftM2 zipD (mapMD cImageToNDArray v1) (mapMD cLabelToNDArray v2)
+    liftM2 zipD (mapMD cImageToNDArray v1) (mapMD cLabelToNDArray v2)
 
-sourceImages :: FilePath -> IO (DatasetVector Image)
+sourceImages :: FilePath -> IO (DatasetVector IO Image)
 sourceImages = parseFile $ do
     HeaderImg n w h <- header
     count n (image w h)
 
-sourceLabels :: FilePath -> IO (DatasetVector Label)
+sourceLabels :: FilePath -> IO (DatasetVector IO Label)
 sourceLabels = parseFile $ do
     HeaderLbl n <- header
     count n label
 
-parseFile :: Parser [a] -> FilePath -> IO (DatasetVector a)
+parseFile :: Parser [a] -> FilePath -> IO (DatasetVector IO a)
 parseFile parser fp = do
-    content <- liftIO $ BS.readFile fp
+    content <- BS.readFile fp
     case AP.parseOnly parser content of
         Left msg -> throwM $ ParseError msg
         Right rt -> return $ fromListD rt
 
-batch :: Int -> DatasetVector a -> DatasetVector (V.Vector a)
+batch :: Int -> DatasetVector IO a -> DatasetVector IO (V.Vector a)
 batch n (DatasetVector vec) = (DatasetVector $ walk n vec)
   where
   walk n vec = V.unfoldr (\v -> if V.null v then Nothing else Just (V.splitAt n v)) vec

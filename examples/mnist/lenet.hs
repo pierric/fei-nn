@@ -89,7 +89,7 @@ main = do
         forM_ (range 1) $ \ind -> do
             liftIO $ putStrLn $ "iteration " ++ show ind
             -- metric <- newMetric "train" (CrossEntropy "y")
-            void $ forEachD_ni trainingData $ \((t,i), (x, y)) -> do
+            void $ forEachD_ni (liftD trainingData) $ \((t,i), (x, y)) -> do
                 -- eval <- format metric
                 liftIO $ printInLine $ show i ++ "/" ++ show t -- ++ " " ++ eval
                 fit (M.fromList [("x", x), ("y", y)])
@@ -97,7 +97,7 @@ main = do
             liftIO $ putStrLn ""
 
         liftIO $ putStrLn $ "[Test] "
-        result <- forEachD_ni testingData $ \((t,i), (x, y)) -> do
+        result <- forEachD_ni (liftD testingData) $ \((t,i), (x, y)) -> do
             liftIO $ printInLine $ show i ++ "/" ++ show t
             [y'] <-  forwardOnly (M.fromList [("x", x), ("y", y)])
             liftIO $ do
