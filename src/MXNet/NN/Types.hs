@@ -65,7 +65,8 @@ data ModuleState a = ModuleState {
 }
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
-data Parameter a = ParameterI { _param_in :: NDArray a, _param_grad :: Maybe (NDArray a) }
+data Parameter a = ParameterV { _param_var :: NDArray a }
+                 | ParameterG { _param_arg :: NDArray a, _param_grad :: NDArray a }
                  | ParameterA { _param_aux :: NDArray a }
   deriving Show
 

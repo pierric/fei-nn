@@ -68,13 +68,13 @@ initialize symbol config = do
     initI placeholder spec2 dinit inp shp =
         case M.lookup inp placeholder of
             Just in_arg -> do
-                return $ ParameterI in_arg Nothing
+                return $ ParameterV in_arg
             Nothing -> do
                 arg_in <- case M.lookup inp spec2 of
                     Just cinit -> cinit inp shp (_cfg_context config)
                     Nothing    -> dinit inp shp (_cfg_context config)
                 arg_gr <- makeEmptyNDArray shp (_cfg_context config)
-                return $ ParameterI arg_in (Just arg_gr)
+                return $ ParameterG arg_in arg_gr
     -- initialize auxiliary symbols.
     initA dinit aux shp = do
         arg_aux <- dinit aux shp (_cfg_context config)
@@ -88,10 +88,9 @@ bind symbol context params trainable = do
     assert (M.keysSet params == S.fromList (argnames ++ auxnames)) (return ())
     -- the parameters to bind should be arranged in the same order as the argnames
     let num_args = length argnames
-        arg_in   = map (_param_in . (params M.!)) argnames
-        arg_gr_w_req = if trainable then flip map argnames $ \name -> do
-                                            a <- _param_grad (params M.! name)
-                                            return (a, 1)
+        arg_all  = map (params M.!) argnames
+        arg_in   = map (\case {ParameterV t -> t; ParameterG t _ -> t}) arg_all
+        arg_gr_w_req = if trainable then map (\case {ParameterV _ -> Nothing; ParameterG _ t -> Just (t, 1)}) arg_all
                                     else replicate num_args Nothing
         aux_arg_aux  = map (_param_aux . (params M.!)) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
@@ -111,17 +110,19 @@ adapt inputs = do
         (args, grads, auxs, exec) <- liftIO $ execReshapeEx exec True True context (M.toList shapes')
         arg_names <- liftIO $ listArguments symbol
         aux_names <- liftIO $ listAuxiliaryStates symbol
-        let arg_ndarrs = M.fromList $ zip arg_names $ map (uncurry ParameterI) (zip args grads)
+        let buildArg a Nothing  = ParameterV a
+            buildArg a (Just b) = ParameterG a b
+        let arg_ndarrs = M.fromList $ zip arg_names $ map (uncurry buildArg) (zip args grads)
             aux_ndarrs = M.fromList $ zip aux_names $ map ParameterA auxs
         untag . mod_executor .= exec
-        untag . mod_input_shapes   .= shapes'
+        untag . mod_input_shapes .= shapes'
         untag . mod_params   .= M.union arg_ndarrs aux_ndarrs
 
     -- copy the ndarray
     targets <- use $ untag . mod_params
     forM_ (M.toList inputs) $ \ (k, src) -> liftIO $ do
         case M.lookup k targets of
-          Just (ParameterI dst _) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
+          Just (ParameterV dst) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
           _ -> return ()
 
 forwardOnly :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m [NDArray dty]
@@ -144,7 +145,7 @@ update :: forall tag dty opt m any. (Optimizer opt, DType dty, MonadIO m) => opt
 update opt blacklist = do
     params <- use (untag . mod_params)
     forM_ (M.toList params) $ \case
-        (k, ParameterI weig (Just grad)) | not (M.member k blacklist) -> do
+        (k, ParameterG weig grad) | not (M.member k blacklist) -> do
             optimize opt k weig grad
         _ -> return ()
     untag . mod_statistics . stat_num_upd += 1
