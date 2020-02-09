@@ -70,14 +70,3 @@ instance CallbackClass Callback where
     endOfEpoch i n (Callback a) = endOfEpoch i n a
     endOfVal   i n (Callback a) = endOfVal   i n a
 
-
-saveState :: Bool -> String -> ModuleState a -> IO ()
-saveState save_symbol name state = do
-    let params = state ^. mod_params
-        symbol = state ^. mod_symbol
-        modelParams = map getModelParam $ M.toList params
-    when save_symbol $ mxSymbolSaveToFile (name ++ ".json") (unSymbol symbol)
-    mxNDArraySave (name ++ ".params") modelParams
-  where
-    getModelParam (key, ParameterI a _) = ("arg:" ++ key, unNDArray a)
-    getModelParam (key, ParameterA a) = ("aux:" ++ key, unNDArray a)

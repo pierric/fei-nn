@@ -9,6 +9,7 @@ import Data.Time.Clock (UTCTime, getCurrentTime, diffUTCTime)
 import MXNet.NN.Types (mod_statistics, stat_last_lr)
 import MXNet.NN.Session
 import MXNet.NN.TaggedState (untag)
+import MXNet.NN.Utils (saveState)
 
 -- | Learning rate
 data DumpLearningRate = DumpLearningRate
@@ -53,6 +54,5 @@ data Checkpoint = Checkpoint String
 
 instance CallbackClass Checkpoint where
     endOfVal i _ (Checkpoint path) = do
-        state <- use untag
         let filename = printf "%s/epoch_%d" path i
-        liftIO $ saveState (i == 0) filename state
+        saveState (i == 0) filename

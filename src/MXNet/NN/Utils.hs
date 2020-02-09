@@ -7,6 +7,7 @@ module MXNet.NN.Utils where
 
 import System.IO (hFlush, stdout)
 import Data.List (intersperse, sortOn)
+import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as M
 import Control.Lens (use)
@@ -14,7 +15,7 @@ import Control.Monad (when, forM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource (MonadThrow(..))
 import System.Directory (listDirectory, getModificationTime)
-import System.FilePath ((</>))
+import System.FilePath ((</>), dropExtension)
 import Text.Printf
 
 import MXNet.Base (Context(..), NDArray(..), Symbol(..), (.&), ArgOf(..), HMap(..))
@@ -61,20 +62,21 @@ endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
 --         toNames (v DT.:< rem) = L.symbolVal v : toNames rem
 
 
-saveStates :: MonadIO m => Bool -> String -> Module t a m ()
-saveStates save_symbol name = do
+saveState :: MonadIO m => Bool -> String -> Module t a m ()
+saveState save_symbol name = do
     params <- use (untag . mod_params)
     symbol <- use (untag . mod_symbol)
-    let modelParams = map getModelParam $ M.toList params
+    let modelParams = mapMaybe getModelParam $ M.toList params
     liftIO $ do
         when save_symbol $ mxSymbolSaveToFile (name ++ ".json") (unSymbol symbol)
         mxNDArraySave (name ++ ".params") modelParams
   where
-    getModelParam (key, ParameterI a _) = ("arg:" ++ key, unNDArray a)
-    getModelParam (key, ParameterA a) = ("aux:" ++ key, unNDArray a)
+    getModelParam (_, ParameterV _)     = Nothing
+    getModelParam (key, ParameterG a _) = Just ("arg:" ++ key, unNDArray a)
+    getModelParam (key, ParameterA a)   = Just ("aux:" ++ key, unNDArray a)
 
-loadStates :: MonadIO m => String -> [String] -> Module t a m ()
-loadStates weights_filename ignores = do
+loadState :: MonadIO m => String -> [String] -> Module t a m ()
+loadState weights_filename ignores = do
     arrays <- liftIO $ mxNDArrayLoad (weights_filename ++ ".params")
     params <- use (untag . mod_params)
     liftIO $ forM_ arrays $ \(name, hdl) -> do
@@ -83,7 +85,7 @@ loadStates weights_filename ignores = do
                 case (key `elem` ignores, typ, M.lookup key params) of
                     (True, _, _) -> return ()
                     (_, _, Nothing) -> putStrLn $ printf "Tensor %s is missing." name
-                    (_, "arg", Just (ParameterI target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                    (_, "arg", Just (ParameterG target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     (_, "aux", Just (ParameterA target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     _ -> throwM (LoadSessionMismatchedTensorKind name)
             _ -> throwM (LoadSessionInvalidTensorName name)
@@ -97,7 +99,7 @@ lastSavedState dir = liftIO $ do
         else do
             mod_time <- mapM (getModificationTime . (dir </>)) param_files
             let latest = fst $ last $ sortOn snd (zip param_files mod_time)
-            return $ Just $ dir </> latest
+            return $ Just $ dir </> dropExtension latest
 
 printInLine :: String -> IO ()
 printInLine str = do
