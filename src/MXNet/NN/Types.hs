@@ -5,7 +5,8 @@
 module MXNet.NN.Types where
 
 import Control.Lens (makeLenses)
-import qualified Data.HashMap.Strict as M
+import Data.HashMap.Strict (HashMap)
+import Data.HashSet (HashSet)
 import Control.Exception.Base (Exception)
 import Data.Typeable (Typeable)
 import qualified Control.Monad.State.Strict as ST
@@ -25,10 +26,11 @@ import MXNet.NN.TaggedState (Tagged)
 -- Note that any symbol not specified will be initialized with the
 -- _cfg_default_initializer.
 data Config a = Config {
-    _cfg_data                :: M.HashMap String [Int],
+    _cfg_data                :: HashMap String [Int],
     _cfg_label               :: [String],
-    _cfg_initializers        :: M.HashMap String (Initializer a),
+    _cfg_initializers        :: HashMap String (Initializer a),
     _cfg_default_initializer :: Initializer a,
+    _cfg_fixed_params        :: HashSet String,
     _cfg_context             :: Context
 }
 
@@ -56,12 +58,12 @@ type ModuleSet tags a m = ST.StateT (DT.Prod (TaggedModuleState a) tags) m
 
 data ModuleState a = ModuleState {
       _mod_symbol       :: Symbol a
-    , _mod_input_shapes :: M.HashMap String [Int]
-    , _mod_params       :: M.HashMap String (Parameter a)
+    , _mod_input_shapes :: HashMap String [Int]
+    , _mod_params       :: HashMap String (Parameter a)
     , _mod_context      :: Context
     , _mod_executor     :: Executor a
     , _mod_statistics   :: Statistics
-    , _mod_scores       :: M.HashMap String Double
+    , _mod_scores       :: HashMap String Double
 }
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'

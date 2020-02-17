@@ -32,6 +32,7 @@ initialize symbol config = do
         spec2 = initializers
         dinit = config ^. cfg_default_initializer
         cxt   = config ^. cfg_context
+        fixed = config ^. cfg_fixed_params
 
     (args, _, auxs, _) <- inferShape symbol (M.toList spec1)
     let arg_with_shp = M.fromList args
@@ -43,7 +44,7 @@ initialize symbol config = do
     let lbl_with_shp = M.filterWithKey (\k _ -> k `elem` label_names) arg_with_shp
     placeholders <- mapM (flip makeEmptyNDArray cxt) $ M.union spec1 lbl_with_shp
 
-    arg_tensors <- M.traverseWithKey (initI placeholders spec2 dinit) arg_with_shp
+    arg_tensors <- M.traverseWithKey (initI placeholders fixed spec2 dinit) arg_with_shp
     aux_tensors <- M.traverseWithKey (initA dinit) aux_with_shp
 
     let params = arg_tensors `M.union` aux_tensors
@@ -65,7 +66,7 @@ initialize symbol config = do
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
     -- other input symbols are initialized by an initializer.
-    initI placeholder spec2 dinit inp shp =
+    initI placeholder fixed spec2 dinit inp shp =
         case M.lookup inp placeholder of
             Just in_arg -> do
                 return $ ParameterV in_arg
@@ -73,8 +74,11 @@ initialize symbol config = do
                 arg_in <- case M.lookup inp spec2 of
                     Just cinit -> cinit inp shp (_cfg_context config)
                     Nothing    -> dinit inp shp (_cfg_context config)
-                arg_gr <- makeEmptyNDArray shp (_cfg_context config)
-                return $ ParameterG arg_in arg_gr
+                if S.member inp fixed
+                    then return $ ParameterV arg_in
+                    else do
+                        arg_gr <- makeEmptyNDArray shp (_cfg_context config)
+                        return $ ParameterG arg_in arg_gr
     -- initialize auxiliary symbols.
     initA dinit aux shp = do
         arg_aux <- dinit aux shp (_cfg_context config)

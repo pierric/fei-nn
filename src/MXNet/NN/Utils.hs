@@ -86,6 +86,7 @@ loadState weights_filename ignores = do
                     (True, _, _) -> return ()
                     (_, _, Nothing) -> putStrLn $ printf "Tensor %s is missing." name
                     (_, "arg", Just (ParameterG target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                    (_, "arg", Just (ParameterV target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     (_, "aux", Just (ParameterA target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     _ -> throwM (LoadSessionMismatchedTensorKind name)
             _ -> throwM (LoadSessionInvalidTensorName name)
