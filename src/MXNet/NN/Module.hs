@@ -57,7 +57,8 @@ initialize symbol config = do
         _mod_context      = cxt,
         _mod_executor     = executor,
         _mod_statistics   = Statistics 0 0,
-        _mod_scores       = M.empty
+        _mod_scores       = M.empty,
+        _mod_fixed_args   = fixed
     }
   where
     input_shapes = config ^. cfg_data
@@ -75,7 +76,7 @@ initialize symbol config = do
                     Just cinit -> cinit inp shp (_cfg_context config)
                     Nothing    -> dinit inp shp (_cfg_context config)
                 if S.member inp fixed
-                    then return $ ParameterV arg_in
+                    then return $ ParameterF arg_in
                     else do
                         arg_gr <- makeEmptyNDArray shp (_cfg_context config)
                         return $ ParameterG arg_in arg_gr
@@ -93,8 +94,8 @@ bind symbol context params trainable = do
     -- the parameters to bind should be arranged in the same order as the argnames
     let num_args = length argnames
         arg_all  = map (params M.!) argnames
-        arg_in   = map (\case {ParameterV t -> t; ParameterG t _ -> t}) arg_all
-        arg_gr_w_req = if trainable then map (\case {ParameterV _ -> Nothing; ParameterG _ t -> Just (t, 1)}) arg_all
+        arg_in   = map (\case {ParameterV t -> t; ParameterF t -> t; ParameterG t _ -> t}) arg_all
+        arg_gr_w_req = if trainable then map (\case {ParameterG _ t -> Just (t, 1); _ -> Nothing}) arg_all
                                     else replicate num_args Nothing
         aux_arg_aux  = map (_param_aux . (params M.!)) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
@@ -104,6 +105,7 @@ adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
     context <- use $ untag . mod_context
+    fixed   <- use $ untag . mod_fixed_args
     -- shapes  <- M.toList <$> use mod_input_shapes
     -- shapes' <- lift $ mapM (runKleisli $ second $ Kleisli ndshape) $ M.toList inputs
     shapes  <- use $ untag . mod_input_shapes
@@ -114,10 +116,12 @@ adapt inputs = do
         (args, grads, auxs, exec) <- liftIO $ execReshapeEx exec True True context (M.toList shapes')
         arg_names <- liftIO $ listArguments symbol
         aux_names <- liftIO $ listAuxiliaryStates symbol
-        let buildArg a Nothing  = ParameterV a
-            buildArg a (Just b) = ParameterG a b
-        let arg_ndarrs = M.fromList $ zip arg_names $ map (uncurry buildArg) (zip args grads)
-            aux_ndarrs = M.fromList $ zip aux_names $ map ParameterA auxs
+        let buildArg key a Nothing  | S.member key fixed = (key, ParameterF a)
+            buildArg key a Nothing  | otherwise = (key, ParameterV a)
+            buildArg key a (Just b) = (key, ParameterG a b)
+            buildAux key a = (key, ParameterA a)
+            arg_ndarrs = M.fromList $ zipWith3 buildArg arg_names args grads
+            aux_ndarrs = M.fromList $ zipWith buildAux aux_names auxs
         untag . mod_executor .= exec
         untag . mod_input_shapes .= shapes'
         untag . mod_params   .= M.union arg_ndarrs aux_ndarrs

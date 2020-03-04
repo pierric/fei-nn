@@ -71,7 +71,8 @@ saveState save_symbol name = do
         when save_symbol $ mxSymbolSaveToFile (name ++ ".json") (unSymbol symbol)
         mxNDArraySave (name ++ ".params") modelParams
   where
-    getModelParam (_, ParameterV _)     = Nothing
+    getModelParam (_,   ParameterV _)   = Nothing 
+    getModelParam (key, ParameterF a)   = Just ("arg:" ++ key, unNDArray a)
     getModelParam (key, ParameterG a _) = Just ("arg:" ++ key, unNDArray a)
     getModelParam (key, ParameterA a)   = Just ("aux:" ++ key, unNDArray a)
 
@@ -86,7 +87,7 @@ loadState weights_filename ignores = do
                     (True, _, _) -> return ()
                     (_, _, Nothing) -> putStrLn $ printf "Tensor %s is missing." name
                     (_, "arg", Just (ParameterG target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-                    (_, "arg", Just (ParameterV target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                    (_, "arg", Just (ParameterF target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     (_, "aux", Just (ParameterA target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
                     _ -> throwM (LoadSessionMismatchedTensorKind name)
             _ -> throwM (LoadSessionInvalidTensorName name)

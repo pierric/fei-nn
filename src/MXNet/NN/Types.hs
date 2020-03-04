@@ -64,10 +64,12 @@ data ModuleState a = ModuleState {
     , _mod_executor     :: Executor a
     , _mod_statistics   :: Statistics
     , _mod_scores       :: HashMap String Double
+    , _mod_fixed_args   :: HashSet String
 }
 
 -- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = ParameterV { _param_var :: NDArray a }
+                 | ParameterF { _param_arg :: NDArray a }
                  | ParameterG { _param_arg :: NDArray a, _param_grad :: NDArray a }
                  | ParameterA { _param_aux :: NDArray a }
   deriving Show
