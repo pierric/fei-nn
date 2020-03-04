@@ -21,18 +21,18 @@ lrOfConst = Const
 
 data FactorScheduler = Factor Float Float Int Float
 instance LrScheduler FactorScheduler where
-    getLR (Factor base factor step stop) nup = 
+    getLR (Factor base factor step stop) nup =
         let lr = base * factor ^ (nup `div` step)
         in if lr < stop then stop else lr
 
 type instance ParameterList "lrOfFactor" =
-    '[ '("factor", 'AttrReq Float), '("step", 'AttrReq Int), 
+    '[ '("factor", 'AttrReq Float), '("step", 'AttrReq Int),
        '("base", 'AttrOpt Float), '("stop", 'AttrOpt Float)]
-       
-lrOfFactor :: Fullfilled "lrOfFactor" args 
+
+lrOfFactor :: Fullfilled "lrOfFactor" args
            => ArgsHMap "lrOfFactor" args -> FactorScheduler
 lrOfFactor args = Factor base factor step stop
-  where 
+  where
     factor = args ! #factor
     step   = args ! #step
     base   = fromMaybe 0.01 (args !? #base)
@@ -52,7 +52,7 @@ type instance ParameterList "lrOfMultifactor" =
 lrOfMultifactor :: Fullfilled "lrOfMultifactor" args
                 => ArgsHMap "lrOfMultifactor" args -> MultifactorScheduler
 lrOfMultifactor args = Multifactor base factor steps
-  where 
+  where
     factor = args ! #factor
     steps  = args ! #steps
     base = fromMaybe 0.01 (args !? #base)
@@ -60,7 +60,7 @@ lrOfMultifactor args = Multifactor base factor steps
 data PolyScheduler = Poly Float Float Int
 instance LrScheduler PolyScheduler where
     getLR (Poly base power maxnup) nup =
-        if nup < maxnup 
+        if nup < maxnup
           then base * (1 - fromIntegral nup / fromIntegral maxnup) ** power
           else 0
 
@@ -70,7 +70,7 @@ type instance ParameterList "lrOfPoly" =
 lrOfPoly :: Fullfilled "lrOfPoly" args
            => ArgsHMap "lrOfPoly" args -> PolyScheduler
 lrOfPoly args = Poly base power maxnup
-  where 
+  where
     maxnup = args ! #maxnup
     base   = fromMaybe 0.01 (args !? #base)
     power  = fromMaybe 2    (args !? #power)
