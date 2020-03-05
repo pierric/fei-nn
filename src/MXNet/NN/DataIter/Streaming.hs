@@ -4,6 +4,7 @@
 module MXNet.NN.DataIter.Streaming (
     StreamData(..),
     Dataset(..),
+    imageRecordIter_v1,
     imageRecordIter, mnistIter, csvIter, libSVMIter
 ) where
 
@@ -19,6 +20,13 @@ import MXNet.NN.DataIter.Class
 data StreamData m a = StreamData {
     iter_batch_size :: Maybe Int,
     getStream :: Stream (Of a) m ()
+}
+
+imageRecordIter_v1 :: (Fullfilled "ImageRecordIter_v1" args, DType a, MonadIO m)
+    => ArgsHMap "ImageRecordIter_v1" args -> StreamData m (NDArray a, NDArray a)
+imageRecordIter_v1 args = StreamData {
+    getStream = makeIter I._ImageRecordIter_v1 args,
+    iter_batch_size = Just (args ! #batch_size)
 }
 
 imageRecordIter :: (Fullfilled "ImageRecordIter" args, DType a, MonadIO m)

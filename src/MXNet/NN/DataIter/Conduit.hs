@@ -4,6 +4,7 @@
 module MXNet.NN.DataIter.Conduit (
     ConduitData(..),
     Dataset(..),
+    imageRecordIter_v1,
     imageRecordIter, mnistIter, csvIter, libSVMIter
 ) where
 
@@ -21,6 +22,13 @@ import MXNet.NN.DataIter.Class
 data ConduitData m a = ConduitData {
     iter_batch_size :: Maybe Int,
     getConduit :: ConduitM () a m ()
+}
+
+imageRecordIter_v1 :: (Fullfilled "ImageRecordIter_v1" args, DType a, MonadIO m)
+    => ArgsHMap "ImageRecordIter_v1" args -> ConduitData m (NDArray a, NDArray a)
+imageRecordIter_v1 args = ConduitData {
+    getConduit = makeIter I._ImageRecordIter_v1 args,
+    iter_batch_size = Just (args ! #batch_size)
 }
 
 imageRecordIter :: (Fullfilled "ImageRecordIter" args, DType a, MonadIO m)
