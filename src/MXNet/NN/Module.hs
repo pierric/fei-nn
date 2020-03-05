@@ -201,7 +201,7 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
             let binding = make_binding vars item
             fitAndEval opt binding trainMetricData
             eval <- format trainMetricData
-            liftIO $ printInLine $ printf "%d%%d %s" i total eval
+            liftIO $ printInLine $ printf "%d %d %s" i total eval
             -- forM_ callbacks (endOfBatch i batchSize)
 
         -- forM_ callbacks (endOfEpoch epochInd total)
