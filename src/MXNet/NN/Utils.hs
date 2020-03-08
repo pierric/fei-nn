@@ -71,26 +71,22 @@ saveState save_symbol name = do
         when save_symbol $ mxSymbolSaveToFile (name ++ ".json") (unSymbol symbol)
         mxNDArraySave (name ++ ".params") modelParams
   where
-    getModelParam (_,   ParameterV _)   = Nothing 
-    getModelParam (key, ParameterF a)   = Just ("arg:" ++ key, unNDArray a)
-    getModelParam (key, ParameterG a _) = Just ("arg:" ++ key, unNDArray a)
-    getModelParam (key, ParameterA a)   = Just ("aux:" ++ key, unNDArray a)
+    getModelParam (_,   ParameterV _)   = Nothing
+    getModelParam (key, ParameterF a)   = Just (key, unNDArray a)
+    getModelParam (key, ParameterG a _) = Just (key, unNDArray a)
+    getModelParam (key, ParameterA a)   = Just (key, unNDArray a)
 
 loadState :: MonadIO m => String -> [String] -> Module t a m ()
 loadState weights_filename ignores = do
     arrays <- liftIO $ mxNDArrayLoad (weights_filename ++ ".params")
     params <- use (untag . mod_params)
     liftIO $ forM_ arrays $ \(name, hdl) -> do
-        case break (==':') name of
-            (typ, ':':key) | typ /= ""->
-                case (key `elem` ignores, typ, M.lookup key params) of
-                    (True, _, _) -> return ()
-                    (_, _, Nothing) -> putStrLn $ printf "Tensor %s is missing." name
-                    (_, "arg", Just (ParameterG target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-                    (_, "arg", Just (ParameterF target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-                    (_, "aux", Just (ParameterA target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-                    _ -> throwM (LoadSessionMismatchedTensorKind name)
-            _ -> throwM (LoadSessionInvalidTensorName name)
+        case (name `elem` ignores, M.lookup name params) of
+            (True, _) -> return ()
+            (_, Nothing) -> putStrLn $ printf "Tensor %s is missing." name
+            (_, Just (ParameterG target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (_, Just (ParameterF target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (_, Just (ParameterA target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
 
 lastSavedState :: MonadIO m => String -> Module t a m (Maybe FilePath)
 lastSavedState dir = liftIO $ do
