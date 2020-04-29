@@ -32,7 +32,9 @@ initialize symbol config = do
         spec2 = initializers
         dinit = config ^. cfg_default_initializer
         cxt   = config ^. cfg_context
-        fixed = config ^. cfg_fixed_params
+        -- remove any input or label from the fixed set
+        fixed = (config ^. cfg_fixed_params) `S.difference`
+                (M.keysSet input_shapes `S.union` S.fromList label_names)
 
     (args, _, auxs, _) <- inferShape symbol (M.toList spec1)
     let arg_with_shp = M.fromList args
