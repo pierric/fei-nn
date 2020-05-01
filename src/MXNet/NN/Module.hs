@@ -159,7 +159,6 @@ update opt blacklist = do
             optimize opt k weig grad
         _ -> return ()
     untag . mod_statistics . stat_num_upd += 1
-    liftIO waitAll
 
 
 fitAndEval :: forall tag dty opt mtr m. (DType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
