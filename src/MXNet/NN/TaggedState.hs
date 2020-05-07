@@ -5,10 +5,11 @@
 {-# LANGUAGE PolyKinds #-}
 module MXNet.NN.TaggedState where
 
+import RIO
+import RIO.State (StateT(..))
 import qualified GHC.TypeLits as L
 import Data.Type.Product
 import Data.Type.Index
-import Control.Monad.State.Strict (StateT(..))
 import Control.Lens (makeLenses)
 import Data.Proxy (Proxy(..))
 
@@ -24,7 +25,7 @@ liftSub (StateT m1) = StateT $ \s -> do
 
 modify :: Index as a -> f a -> Prod f as -> Prod f as
 modify IZ new (_ :< remainder) = new :< remainder
-modify (IS s) new (first :< remainder) = first :< modify s new remainder
+modify (IS s) new (item :< remainder) = item :< modify s new remainder
 
 toPair :: forall t a. L.KnownSymbol t => Tagged a t -> (String, a)
 toPair (Tagged a)= (L.symbolVal (Proxy :: Proxy t), a)

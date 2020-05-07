@@ -1,5 +1,6 @@
 module MXNet.NN.NDArray where
 
+import RIO
 import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as I
 

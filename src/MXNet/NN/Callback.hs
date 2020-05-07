@@ -1,10 +1,10 @@
 module MXNet.NN.Callback where
 
+import RIO
+import RIO.Time
+import RIO.FilePath
+import Formatting
 import Control.Lens (use)
-import Text.Printf (printf)
-import Control.Monad.IO.Class (liftIO)
-import Data.IORef
-import Data.Time.Clock (UTCTime, getCurrentTime, diffUTCTime)
 
 import MXNet.NN.Types (mod_statistics, stat_last_lr)
 import MXNet.NN.Session
@@ -17,7 +17,7 @@ data DumpLearningRate = DumpLearningRate
 instance CallbackClass DumpLearningRate where
     endOfBatch _ _ _ = do
         lr <- use (untag . mod_statistics . stat_last_lr)
-        liftIO $ putStr $ printf "<lr: %0.6f> " lr
+        lift . logInfo . display $ sformat ("<lr: " % fixed 6 % ">") lr
 
 -- | Throughput
 data DumpThroughputEpoch = DumpThroughputEpoch {
@@ -33,13 +33,13 @@ instance CallbackClass DumpThroughputEpoch where
         liftIO $ getCurrentTime >>= writeIORef tt1Ref
     endOfEpoch _ _ (DumpThroughputEpoch _ tt2Ref _) = do
         liftIO $ getCurrentTime >>= writeIORef tt2Ref
-    endOfVal   _ _ (DumpThroughputEpoch tt1Ref tt2Ref totalRef) = liftIO $ do
+    endOfVal   _ _ (DumpThroughputEpoch tt1Ref tt2Ref totalRef) = do
         tbeg <- readIORef tt1Ref
         tend <- readIORef tt2Ref
         let diff = realToFrac $ diffUTCTime tend tbeg :: Float
         total <- readIORef totalRef
-        putStr $ printf "Throughput: %d samepls/sec " (floor $ fromIntegral total / diff :: Int)
         writeIORef totalRef 0
+        lift . logInfo . display $ sformat ("Throughput: " % int % " samples/sec") (floor $ fromIntegral total / diff :: Int)
 
 dumpThroughputEpoch :: IO Callback
 dumpThroughputEpoch = do
@@ -50,9 +50,9 @@ dumpThroughputEpoch = do
     return $ Callback $ DumpThroughputEpoch r0 r1 r2
 
 -- | Checkpoint
-data Checkpoint = Checkpoint String
+data Checkpoint = Checkpoint FilePath
 
 instance CallbackClass Checkpoint where
     endOfVal i _ (Checkpoint path) = do
-        let filename = printf "%s/epoch_%d" path i
+        let filename = path </> formatToString ("epoch_" % int) i
         saveState (i == 0) filename

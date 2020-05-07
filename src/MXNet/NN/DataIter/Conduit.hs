@@ -8,12 +8,11 @@ module MXNet.NN.DataIter.Conduit (
     imageRecordIter, mnistIter, csvIter, libSVMIter
 ) where
 
+import RIO
+import RIO.Prelude (lift)
 import Data.Conduit
 import qualified Data.Conduit.Combinators as C
 import qualified Data.Conduit.List as CL
-import Control.Applicative
-import Control.Monad.IO.Class
-import Control.Monad.Trans (lift)
 
 import MXNet.Base
 import qualified MXNet.Base.DataIter as I
@@ -24,41 +23,43 @@ data ConduitData m a = ConduitData {
     getConduit :: ConduitM () a m ()
 }
 
-imageRecordIter_v1 :: (Fullfilled "ImageRecordIter_v1" args, DType a, MonadIO m)
-    => ArgsHMap "ImageRecordIter_v1" args -> ConduitData m (NDArray a, NDArray a)
+imageRecordIter_v1 :: (Fullfilled "_ImageRecordIter_v1" args, DType a, MonadIO m)
+    => ArgsHMap "_ImageRecordIter_v1" args -> ConduitData m (NDArray a, NDArray a)
 imageRecordIter_v1 args = ConduitData {
     getConduit = makeIter I._ImageRecordIter_v1 args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-imageRecordIter :: (Fullfilled "ImageRecordIter" args, DType a, MonadIO m)
-    => ArgsHMap "ImageRecordIter" args -> ConduitData m (NDArray a, NDArray a)
+imageRecordIter :: (Fullfilled "_ImageRecordIter" args, DType a, MonadIO m)
+    => ArgsHMap "_ImageRecordIter" args -> ConduitData m (NDArray a, NDArray a)
 imageRecordIter args = ConduitData {
     getConduit = makeIter I._ImageRecordIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-mnistIter :: (Fullfilled "MNISTIter" args, DType a, MonadIO m)
-    => ArgsHMap "MNISTIter" args -> ConduitData m (NDArray a, NDArray a)
+mnistIter :: (Fullfilled "_MNISTIter" args, DType a, MonadIO m)
+    => ArgsHMap "_MNISTIter" args -> ConduitData m (NDArray a, NDArray a)
 mnistIter args = ConduitData {
     getConduit = makeIter I._MNISTIter args,
     iter_batch_size = (args !? #batch_size) <|> Just 1
 }
 
-csvIter :: (Fullfilled "CSVIter" args, DType a, MonadIO m)
-    => ArgsHMap "CSVIter" args -> ConduitData m (NDArray a, NDArray a)
+csvIter :: (Fullfilled "_CSVIter" args, DType a, MonadIO m)
+    => ArgsHMap "_CSVIter" args -> ConduitData m (NDArray a, NDArray a)
 csvIter args = ConduitData {
     getConduit = makeIter I._CSVIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-libSVMIter :: (Fullfilled "LibSVMIter" args, DType a, MonadIO m)
-    => ArgsHMap "LibSVMIter" args -> ConduitData m (NDArray a, NDArray a)
+libSVMIter :: (Fullfilled "_LibSVMIter" args, DType a, MonadIO m)
+    => ArgsHMap "_LibSVMIter" args -> ConduitData m (NDArray a, NDArray a)
 libSVMIter args = ConduitData {
     getConduit = makeIter I._LibSVMIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
+makeIter :: MonadIO m
+    => (args -> IO DataIterHandle) -> args -> ConduitT i (NDArray a, NDArray a) m ()
 makeIter creator args = do
     iter <- liftIO (creator args)
     let loop = do valid <- liftIO $ mxDataIterNext iter
@@ -78,7 +79,7 @@ instance Dataset ConduitData where
     zipD d1 d2 = ConduitData Nothing $ getZipSource $ (,) <$> ZipSource (getConduit d1) <*> ZipSource (getConduit d2)
     sizeD d = runConduit (getConduit d .| C.length)
     forEachD d proc = sourceToList $ getConduit d .| CL.mapM proc
-    foldD proc elem d = runConduit (getConduit d .| C.foldM proc elem)
+    foldD proc unit d = runConduit (getConduit d .| C.foldM proc unit)
     takeD n d = d {getConduit = getConduit d .| C.take n}
     liftD d = d {getConduit = transPipe lift (getConduit d)}
 

@@ -8,10 +8,11 @@ module MXNet.NN.DataIter.Streaming (
     imageRecordIter, mnistIter, csvIter, libSVMIter
 ) where
 
+import RIO
+import RIO.Prelude (lift)
 import Streaming
 import Streaming.Prelude (Of(..), yield, length_, toList_)
 import qualified Streaming.Prelude as S
-import Control.Monad.Trans (lift)
 
 import MXNet.Base
 import qualified MXNet.Base.DataIter as I
@@ -22,42 +23,43 @@ data StreamData m a = StreamData {
     getStream :: Stream (Of a) m ()
 }
 
-imageRecordIter_v1 :: (Fullfilled "ImageRecordIter_v1" args, DType a, MonadIO m)
-    => ArgsHMap "ImageRecordIter_v1" args -> StreamData m (NDArray a, NDArray a)
+imageRecordIter_v1 :: (Fullfilled "_ImageRecordIter_v1" args, DType a, MonadIO m)
+    => ArgsHMap "_ImageRecordIter_v1" args -> StreamData m (NDArray a, NDArray a)
 imageRecordIter_v1 args = StreamData {
     getStream = makeIter I._ImageRecordIter_v1 args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-imageRecordIter :: (Fullfilled "ImageRecordIter" args, DType a, MonadIO m)
-    => ArgsHMap "ImageRecordIter" args -> StreamData m (NDArray a, NDArray a)
+imageRecordIter :: (Fullfilled "_ImageRecordIter" args, DType a, MonadIO m)
+    => ArgsHMap "_ImageRecordIter" args -> StreamData m (NDArray a, NDArray a)
 imageRecordIter args = StreamData {
     getStream = makeIter I._ImageRecordIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-mnistIter :: (Fullfilled "MNISTIter" args, DType a, MonadIO m)
-    => ArgsHMap "MNISTIter" args -> StreamData m (NDArray a, NDArray a)
+mnistIter :: (Fullfilled "_MNISTIter" args, DType a, MonadIO m)
+    => ArgsHMap "_MNISTIter" args -> StreamData m (NDArray a, NDArray a)
 mnistIter args = StreamData {
     getStream = makeIter I._MNISTIter args,
     iter_batch_size = (args !? #batch_size) <|> Just 1
 }
 
-csvIter :: (Fullfilled "CSVIter" args, DType a, MonadIO m)
-    => ArgsHMap "CSVIter" args -> StreamData m (NDArray a, NDArray a)
+csvIter :: (Fullfilled "_CSVIter" args, DType a, MonadIO m)
+    => ArgsHMap "_CSVIter" args -> StreamData m (NDArray a, NDArray a)
 csvIter args = StreamData {
     getStream = makeIter I._CSVIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-libSVMIter :: (Fullfilled "LibSVMIter" args, DType a, MonadIO m)
-    => ArgsHMap "LibSVMIter" args -> StreamData m (NDArray a, NDArray a)
+libSVMIter :: (Fullfilled "_LibSVMIter" args, DType a, MonadIO m)
+    => ArgsHMap "_LibSVMIter" args -> StreamData m (NDArray a, NDArray a)
 libSVMIter args = StreamData {
     getStream = makeIter I._LibSVMIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-
+makeIter :: MonadIO m
+    => (args -> IO DataIterHandle) -> args -> Stream (Of (NDArray a, NDArray a)) m ()
 makeIter creator args = do
     iter <- liftIO (creator args)
     let loop = do valid <- liftIO $ mxDataIterNext iter
@@ -78,7 +80,7 @@ instance Dataset StreamData where
     zipD s1 s2 = StreamData Nothing $ S.zip (getStream s1) (getStream s2)
     sizeD = length_ . getStream
     forEachD dat proc = toList_ $ void $ S.mapM proc (getStream dat)
-    foldD proc elem dat = S.foldM_ proc (return elem) return (getStream dat)
+    foldD proc unit dat = S.foldM_ proc (return unit) return (getStream dat)
     takeD n dat = dat { getStream = S.take n (getStream dat) }
     liftD dat = dat { getStream = hoist lift (getStream dat) }
 

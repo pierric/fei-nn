@@ -3,8 +3,8 @@
 {-# LANGUAGE TypeOperators #-}
 module MXNet.NN.LrScheduler where
 
+import RIO hiding (Const)
 import MXNet.Base.Spec.Operator
-import Data.Maybe (fromMaybe)
 
 class LrScheduler sch where
     getLR :: sch -> Int -> Float
