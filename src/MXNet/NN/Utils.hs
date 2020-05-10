@@ -34,10 +34,6 @@ formatContext Context{..} = sformat (stext % "(" % int % ")") (getDeviceName _de
     getDeviceName 3 = "cpu_pinned"
     getDeviceName _ = error "formatContext: unknown device type"
 
-endsWith :: String -> String -> Bool
-endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
-
-
 -- class Session s where
 --     saveSession :: (String -> String) -> Bool -> ST.StateT s IO ()
 --
@@ -98,7 +94,7 @@ lastSavedState :: MonadIO m => Text -> Module t a m (Maybe FilePath)
 lastSavedState dir = liftIO $ do
     let sdir = T.unpack dir
     files <- listDirectory sdir
-    let param_files = filter (endsWith ".params") files
+    let param_files = filter (T.isSuffixOf ".params" . T.pack) files
     if null param_files
         then return Nothing
         else do

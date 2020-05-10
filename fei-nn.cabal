@@ -19,6 +19,7 @@ Library
                             MXNet.NN.Session
                             MXNet.NN.Utils
                             MXNet.NN.Utils.GraphViz
+                            MXNet.NN.Utils.Repa
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
                             MXNet.NN.LrScheduler
@@ -41,6 +42,7 @@ Library
                             OverloadedLabels,
                             OverloadedStrings,
                             FlexibleContexts,
+                            FlexibleInstances,
                             LambdaCase,
                             MultiWayIf,
                             DoAndIfThenElse,
@@ -64,5 +66,7 @@ Library
                           , conduit >= 1.2 && < 1.4
                           , conduit-combinators >= 1.1.2 && < 1.4
                           , formatting
+                          , wl-pprint-text
+                          , repa
                           , rio
                           , fei-base
