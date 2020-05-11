@@ -26,7 +26,7 @@ import MXNet.NN.TaggedState (Tagged)
 -- Note that any symbol not specified will be initialized with the
 -- _cfg_default_initializer.
 data Config a = Config {
-    _cfg_data                :: HashMap Text (NonEmpty Int),
+    _cfg_data                :: HashMap Text FShape,
     _cfg_label               :: [Text],
     _cfg_initializers        :: HashMap Text (Initializer a),
     _cfg_default_initializer :: Initializer a,

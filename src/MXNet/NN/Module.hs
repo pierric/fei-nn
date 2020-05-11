@@ -2,20 +2,14 @@ module MXNet.NN.Module where
 
 import RIO hiding (evaluate)
 import qualified RIO.HashMap as M
-import qualified RIO.HashMap.Partial as M ((!))
 import qualified RIO.HashSet as S
 import qualified RIO.NonEmpty as RNE ((<|))
 import RIO.List (zipWith3)
 import Control.Lens.Setter ((.=), (+=), (%=))
-import Control.Lens.Getter (use)
+import Control.Lens (use, (^?!), ix)
 import Formatting (sformat, (%), int, stext)
 
-import MXNet.Base (
-    DType, Context,
-    Symbol, listArguments, listAuxiliaryStates, inferShape,
-    NDArray(..), ndshape, makeEmptyNDArray,
-    Executor, execForward, execBackward, execGetOutputs, execReshapeEx, execBind,
-    (.&), ArgOf(..), HMap(..))
+import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 import MXNet.NN.TaggedState (Tagged(..), untag)
@@ -23,10 +17,15 @@ import MXNet.NN.Optimizer (Optimizer, optimize)
 import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..))
 import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
 
+
+data UnkownShapeOrScalar = UnkownShapeOrScalar Text
+    deriving (Typeable, Show)
+instance Exception UnkownShapeOrScalar
+
 initialize :: forall tag dty. DType dty => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
      -- give a initial batch_size = 1 for the placeholders
-    let spec1 = M.map (1 RNE.<|) $ M.difference input_shapes initializers
+    let spec1 = M.map (shapeCons 1) $ M.difference input_shapes initializers
         spec2 = initializers
         dinit = config ^. cfg_default_initializer
         cxt   = config ^. cfg_context
@@ -34,15 +33,16 @@ initialize symbol config = do
         fixed = (config ^. cfg_fixed_params) `S.difference`
                 (S.fromList $ M.keys input_shapes ++ label_names)
 
-    (args, _, auxs, _) <- inferShape symbol (M.toList spec1)
-    let arg_with_shp = M.fromList args
-        aux_with_shp = M.fromList auxs
+    (args, _, auxs, r) <- inferShape symbol (M.toList spec1)
+    arg_with_shp <- M.fromList <$> mapM checkTensorShape args
+    aux_with_shp <- M.fromList <$> mapM checkTensorShape auxs
     ---------------------
     -- important! labels should be merged into placeholders,
     -- otherwise the labels are considered to have gradient.
     ---------------------
     let lbl_with_shp = M.filterWithKey (\k _ -> k `elem` label_names) arg_with_shp
-    placeholders <- mapM (flip makeEmptyNDArray cxt) $ M.union spec1 lbl_with_shp
+        phl_with_shp = M.map _shape_nonempty spec1 `M.union` lbl_with_shp
+    placeholders <- mapM (flip makeEmptyNDArray cxt) phl_with_shp
 
     arg_tensors <- M.traverseWithKey (initI placeholders fixed spec2 dinit) arg_with_shp
     aux_tensors <- M.traverseWithKey (initA dinit) aux_with_shp
@@ -52,7 +52,7 @@ initialize symbol config = do
 
     return $ Tagged $ ModuleState {
         _mod_symbol       = symbol,
-        _mod_input_shapes = M.union input_shapes lbl_with_shp,
+        _mod_input_shapes = phl_with_shp,
         _mod_params       = params,
         _mod_context      = cxt,
         _mod_executor     = executor,
@@ -85,6 +85,9 @@ initialize symbol config = do
         arg_aux <- dinit aux shp (_cfg_context config)
         return $ ParameterA arg_aux
 
+    checkTensorShape (name, SScalar)   = throwIO $ UnkownShapeOrScalar name
+    checkTensorShape (name, STensor s) = return (name, s)
+
 bind :: DType dty => Symbol dty -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
@@ -93,7 +96,7 @@ bind symbol context params trainable = do
     assert (S.fromList (M.keys params) == S.fromList (argnames ++ auxnames)) (return ())
     -- the parameters to bind should be arranged in the same order as the argnames
     let num_args = length argnames
-        arg_all  = map (params M.!) argnames
+        arg_all  = map ((params ^?!) . ix) argnames
         arg_in   = map (\case {
                     ParameterV t -> t;
                     ParameterF t -> t;
@@ -102,7 +105,7 @@ bind symbol context params trainable = do
                     }) arg_all
         arg_gr_w_req = if trainable then map (\case {ParameterG _ t -> Just (t, 1); _ -> Nothing}) arg_all
                                     else replicate num_args Nothing
-        aux_arg_aux  = map (_param_aux . (params M.!)) auxnames
+        aux_arg_aux  = map (_param_aux . (params ^?!) . ix) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
 adapt :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()

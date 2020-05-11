@@ -113,7 +113,7 @@ instance EvalMetricMethod CrossEntropy where
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
         return $ sformat
-            ("<Accuracy: " % fixed 2 % ">")
+            ("<CE: " % fixed 2 % ">")
             (realToFrac s / fromIntegral n :: Float)
 
 data ListOfMetric ms a where
