@@ -1,50 +1,48 @@
 module MXNet.NN.Module where
 
-import qualified Data.HashMap.Strict as M
-import qualified Data.HashSet as S
-import Text.Printf
+import RIO
+import qualified RIO.HashMap as M
+import qualified RIO.HashSet as S
+import qualified RIO.NonEmpty as RNE ((<|))
+import RIO.List (zipWith3)
 import Control.Lens.Setter ((.=), (+=), (%=))
-import Control.Lens.Getter (use, (^.))
-import Control.Monad (when, forM_, void)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Exception (assert)
-import Control.Monad.Trans.Resource (MonadThrow(..))
+import Control.Lens (use, (^?!), ix)
+import Formatting (sformat, (%), int, stext)
 
-import MXNet.Base (
-    DType, Context,
-    Symbol, listArguments, listAuxiliaryStates, inferShape,
-    NDArray(..), ndshape, makeEmptyNDArray,
-    Executor, execForward, execBackward, execGetOutputs, execReshapeEx, execBind,
-    waitAll,
-    (.&), ArgOf(..), HMap(..))
+import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 import MXNet.NN.TaggedState (Tagged(..), untag)
 import MXNet.NN.Optimizer (Optimizer, optimize)
 import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..))
 import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
-import MXNet.NN.Utils (printInLine)
+
+
+data UnkownShapeOrScalar = UnkownShapeOrScalar Text
+    deriving (Typeable, Show)
+instance Exception UnkownShapeOrScalar
 
 initialize :: forall tag dty. DType dty => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
      -- give a initial batch_size = 1 for the placeholders
-    let spec1 = M.map (1:) $ M.difference input_shapes initializers
+    let spec1 = M.map (shapeCons 1) $ M.difference input_shapes initializers
         spec2 = initializers
         dinit = config ^. cfg_default_initializer
         cxt   = config ^. cfg_context
         -- remove any input or label from the fixed set
         fixed = (config ^. cfg_fixed_params) `S.difference`
-                (M.keysSet input_shapes `S.union` S.fromList label_names)
+                (S.fromList $ M.keys input_shapes ++ label_names)
 
-    (args, _, auxs, _) <- inferShape symbol (M.toList spec1)
-    let arg_with_shp = M.fromList args
-        aux_with_shp = M.fromList auxs
+    (args, _, auxs, r) <- inferShape symbol (M.toList spec1)
+    arg_with_shp <- M.fromList <$> mapM checkTensorShape args
+    aux_with_shp <- M.fromList <$> mapM checkTensorShape auxs
     ---------------------
     -- important! labels should be merged into placeholders,
     -- otherwise the labels are considered to have gradient.
     ---------------------
     let lbl_with_shp = M.filterWithKey (\k _ -> k `elem` label_names) arg_with_shp
-    placeholders <- mapM (flip makeEmptyNDArray cxt) $ M.union spec1 lbl_with_shp
+        phl_with_shp = M.map _shape_nonempty spec1 `M.union` lbl_with_shp
+    placeholders <- mapM (flip makeEmptyNDArray cxt) phl_with_shp
 
     arg_tensors <- M.traverseWithKey (initI placeholders fixed spec2 dinit) arg_with_shp
     aux_tensors <- M.traverseWithKey (initA dinit) aux_with_shp
@@ -54,7 +52,7 @@ initialize symbol config = do
 
     return $ Tagged $ ModuleState {
         _mod_symbol       = symbol,
-        _mod_input_shapes = M.union input_shapes lbl_with_shp,
+        _mod_input_shapes = phl_with_shp,
         _mod_params       = params,
         _mod_context      = cxt,
         _mod_executor     = executor,
@@ -87,22 +85,30 @@ initialize symbol config = do
         arg_aux <- dinit aux shp (_cfg_context config)
         return $ ParameterA arg_aux
 
-bind :: DType dty => Symbol dty -> Context -> M.HashMap String (Parameter dty) -> Bool -> IO (Executor dty)
+    checkTensorShape (name, SScalar)   = throwIO $ UnkownShapeOrScalar name
+    checkTensorShape (name, STensor s) = return (name, s)
+
+bind :: DType dty => Symbol dty -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
     auxnames <- listAuxiliaryStates symbol
     -- sanity check
-    assert (M.keysSet params == S.fromList (argnames ++ auxnames)) (return ())
+    assert (S.fromList (M.keys params) == S.fromList (argnames ++ auxnames)) (return ())
     -- the parameters to bind should be arranged in the same order as the argnames
     let num_args = length argnames
-        arg_all  = map (params M.!) argnames
-        arg_in   = map (\case {ParameterV t -> t; ParameterF t -> t; ParameterG t _ -> t}) arg_all
+        arg_all  = map ((params ^?!) . ix) argnames
+        arg_in   = map (\case {
+                    ParameterV t -> t;
+                    ParameterF t -> t;
+                    ParameterG t _ -> t;
+                    ParameterA _ -> error "auxiliary parameter shouldn't occur"
+                    }) arg_all
         arg_gr_w_req = if trainable then map (\case {ParameterG _ t -> Just (t, 1); _ -> Nothing}) arg_all
                                     else replicate num_args Nothing
-        aux_arg_aux  = map (_param_aux . (params M.!)) auxnames
+        aux_arg_aux  = map (_param_aux . (params ^?!) . ix) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
-adapt :: (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m ()
+adapt :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
@@ -135,7 +141,7 @@ adapt inputs = do
           Just (ParameterV dst) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
           _ -> return ()
 
-forwardOnly :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m [NDArray dty]
+forwardOnly :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
 forwardOnly inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -143,7 +149,7 @@ forwardOnly inputs = do
         execForward exec False
         execGetOutputs exec
 
-fit :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap String (NDArray dty) -> Module tag dty m ()
+fit :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 fit inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -151,7 +157,7 @@ fit inputs = do
         execForward exec True
         execBackward exec []
 
-update :: forall tag dty opt m any. (Optimizer opt, DType dty, MonadIO m) => opt dty -> M.HashMap String any -> Module tag dty m ()
+update :: forall tag dty opt m any. (Optimizer opt, DType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
 update opt blacklist = do
     params <- use (untag . mod_params)
     forM_ (M.toList params) $ \case
@@ -162,22 +168,24 @@ update opt blacklist = do
 
 
 fitAndEval :: forall tag dty opt mtr m. (DType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
-           => opt dty -> M.HashMap String (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
+           => opt dty -> M.HashMap Text (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
 fitAndEval opt datAndLbl metric = do
     fit datAndLbl
     update opt M.empty
     exec <- use (untag . mod_executor)
     out  <- liftIO $ execGetOutputs exec
-    eval_results <- evaluate metric datAndLbl out
+    eval_results <- evalMetric metric datAndLbl out
     untag . mod_scores %= M.union eval_results
 
 
-fitDataset :: (Dataset d, DatasetProp d e, DType a, MonadIO m, MonadThrow m,
+fitDataset :: (Dataset d, DatasetProp d e, DType a,
+        MonadIO m, MonadThrow m, MonadReader env m, HasLogFunc env,
+        HasCallStack,
         DatasetMonadConstraint d (Module t a m),
         Optimizer opt, EvalMetricMethod mtr)
     => d (Module t a m) e
     -> d (Module t a m) e
-    -> ([String] -> e -> M.HashMap String (NDArray a))
+    -> ([Text] -> e -> M.HashMap Text (NDArray a))
     -> opt a
     -> mtr a
     -> Int
@@ -188,34 +196,33 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
     vars <- M.keys <$> use (untag . mod_input_shapes)
 
     total     <- sizeD trainDataset
-    batchSize <- batchSizeD trainDataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
+    -- batchSize <- batchSizeD trainDataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
 
-    liftIO $ putStrLn $ "[Train]"
-    forM_ (enumFromTo 1 epochs) $ \epochInd -> do
+    lift . logInfo $ display ("[Train]" :: Text)
+    forM_ [1..epochs] $ \epochInd -> do
         trainMetricData <- newMetric "train" metric
 
-        liftIO $ putStrLn $ "epoch " ++ show epochInd
+        lift . logInfo . display $ sformat ("epoch " % int) epochInd
         -- forM_ callbacks (begOfEpoch epochInd total)
 
         void $ forEachD_i trainDataset $ \(i, item) -> do
             -- forM_ callbacks (begOfBatch i batchSize)
             let binding = make_binding vars item
             fitAndEval opt binding trainMetricData
-            eval <- format trainMetricData
-            liftIO $ printInLine $ printf "%d %d %s" i total eval
+            eval <- formatMetric trainMetricData
+            lift . logInfo . display $ sformat (int % int % stext) i total eval
             -- forM_ callbacks (endOfBatch i batchSize)
 
         -- forM_ callbacks (endOfEpoch epochInd total)
 
-        liftIO $ putStrLn "\n[Validate]"
+        lift . logInfo $ display ("[Validate]" :: Text)
         valMetricData <- newMetric "val" metric
         void $ forEachD valDataset $ \item -> do
             let binding = make_binding vars item
             -- TODO: it is bad to pass labels to forwardOnly
             out <- forwardOnly binding
-            evaluate valMetricData binding out
-        eval <- format valMetricData
-        liftIO $ putStrLn eval
-
+            evalMetric valMetricData binding out
+        eval <- formatMetric valMetricData
+        lift . logInfo $ display eval
+        --
         -- forM_ callbacks (endOfVal epochInd total)
-        liftIO $ putStrLn ""

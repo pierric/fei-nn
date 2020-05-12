@@ -2,9 +2,10 @@
 {-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.DataIter.Vec where
 
-import Data.Vector (Vector)
-import qualified Data.Vector as V
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import RIO
+import qualified RIO.NonEmpty as RNE
+import qualified RIO.Vector.Boxed as V
+import qualified RIO.Vector.Boxed.Partial as V (head)
 
 import MXNet.NN.DataIter.Class
 import MXNet.Base (NDArray, DType, ndshape)
@@ -25,15 +26,15 @@ instance Dataset DatasetVector where
 
 instance DType a => DatasetProp DatasetVector (NDArray a) where
     batchSizeD (DatasetVector dat) = liftIO $ do
-        batch_size : _ <- ndshape $ V.head dat
+        batch_size <- RNE.head <$> ndshape (V.head dat)
         return $ Just batch_size
 
 instance DType a => DatasetProp DatasetVector (NDArray a, NDArray a) where
     batchSizeD (DatasetVector dat) = do
         let (arr1, arr2) = V.head dat
         liftIO $ do
-            batch_size1 : _ <- ndshape arr1
-            batch_size2 : _ <- ndshape arr2
+            batch_size1 <- RNE.head <$> ndshape arr1
+            batch_size2 <- RNE.head <$> ndshape arr2
             return $ if batch_size1 /= batch_size2
                         then Nothing
                         else Just batch_size1

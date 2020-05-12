@@ -1,45 +1,38 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.Utils where
 
-import System.IO (hFlush, stdout)
-import Data.List (intersperse, sortOn)
+import RIO
+import qualified RIO.Text as T
+import qualified RIO.NonEmpty as RNE
+import RIO.List (sortOn, lastMaybe)
 import Data.Maybe (mapMaybe)
-import qualified Data.Text as T
-import qualified Data.HashMap.Strict as M
+import RIO.Directory (listDirectory, getModificationTime)
+import RIO.FilePath ((</>), dropExtension)
+import qualified RIO.HashMap as M
+import System.IO (stdout, putStr)
 import Control.Lens (use)
-import Control.Monad (when, forM_)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Trans.Resource (MonadThrow(..))
-import System.Directory (listDirectory, getModificationTime)
-import System.FilePath ((</>), dropExtension)
-import Text.Printf
+import Formatting
 
 import MXNet.Base (Context(..), NDArray(..), Symbol(..), (.&), ArgOf(..), HMap(..))
 import MXNet.Base.Raw (mxSymbolSaveToFile, mxNDArraySave, mxNDArrayLoad)
 import qualified MXNet.Base.Operators.NDArray as A
-import MXNet.NN.Types (Module, Parameter(..), Exc(..), mod_params, mod_symbol)
+import MXNet.NN.Types (Module, Parameter(..), mod_params, mod_symbol)
 import MXNet.NN.TaggedState (untag)
 
 -- | format a shape
-formatShape :: [Int] -> String
-formatShape shape = concat $ ["("] ++ intersperse "," (map show shape) ++ [")"]
+formatShape :: NonEmpty Int -> Text
+formatShape shape = let sshape = RNE.intersperse "," (RNE.map tshow shape)
+                    in T.concat $ ["("] ++ RNE.toList sshape ++ [")"]
 
 -- | format a context
-formatContext :: Context -> String
-formatContext Context{..} = getDeviceName _device_type ++ "(" ++ show _device_id ++ ")"
+formatContext :: Context -> Text
+formatContext Context{..} = sformat (stext % "(" % int % ")") (getDeviceName _device_type) _device_id
   where
+    getDeviceName :: Int -> Text
     getDeviceName 1 = "cpu"
     getDeviceName 2 = "gpu"
     getDeviceName 3 = "cpu_pinned"
     getDeviceName _ = error "formatContext: unknown device type"
-
-endsWith :: String -> String -> Bool
-endsWith s1 s2 = T.isSuffixOf (T.pack s1) (T.pack s2)
-
 
 -- class Session s where
 --     saveSession :: (String -> String) -> Bool -> ST.StateT s IO ()
@@ -68,39 +61,50 @@ saveState save_symbol name = do
     symbol <- use (untag . mod_symbol)
     let modelParams = mapMaybe getModelParam $ M.toList params
     liftIO $ do
-        when save_symbol $ mxSymbolSaveToFile (name ++ ".json") (unSymbol symbol)
-        mxNDArraySave (name ++ ".params") modelParams
+        when save_symbol $ mxSymbolSaveToFile (T.pack $ name ++ ".json") (unSymbol symbol)
+        mxNDArraySave (T.pack $ name ++ ".params") modelParams
   where
     getModelParam (_,   ParameterV _)   = Nothing
     getModelParam (key, ParameterF a)   = Just (key, unNDArray a)
     getModelParam (key, ParameterG a _) = Just (key, unNDArray a)
     getModelParam (key, ParameterA a)   = Just (key, unNDArray a)
 
-loadState :: MonadIO m => String -> [String] -> Module t a m ()
+loadState :: (MonadIO m, MonadReader env m, HasLogFunc env, HasCallStack)
+    => String -> [Text] -> Module t a m ()
 loadState weights_filename ignores = do
-    arrays <- liftIO $ mxNDArrayLoad (weights_filename ++ ".params")
+    arrays <- liftIO $ mxNDArrayLoad (T.pack $ weights_filename ++ ".params")
     params <- use (untag . mod_params)
-    liftIO $ forM_ arrays $ \(name, hdl) -> do
+    forM_ arrays $ \(name, hdl) -> do
         case (name `elem` ignores, M.lookup name params) of
-            (True, _) -> return ()
-            (_, Nothing) -> putStrLn $ printf "Tensor %s is missing." name
-            (_, Just (ParameterG target _)) -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-            (_, Just (ParameterF target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
-            (_, Just (ParameterA target))   -> A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (True, _) ->
+                return ()
+            (_, Nothing) ->
+                lift $ logInfo $ display $ sformat ("Tensor " % stext % " is missing.") name
+            (_, Just (ParameterG target _)) ->
+                liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (_, Just (ParameterF target)) ->
+                liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (_, Just (ParameterA target)) ->
+                liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+            (_, Just (ParameterV _)) ->
+                logWarn . display $ sformat
+                    ("a variable (" % stext % ") found in the state file.") name
 
-lastSavedState :: MonadIO m => String -> Module t a m (Maybe FilePath)
+lastSavedState :: MonadIO m => Text -> Module t a m (Maybe FilePath)
 lastSavedState dir = liftIO $ do
-    files <- listDirectory dir
-    let param_files = filter (endsWith ".params") files
+    let sdir = T.unpack dir
+    files <- listDirectory sdir
+    let param_files = filter (T.isSuffixOf ".params" . T.pack) files
     if null param_files
         then return Nothing
         else do
-            mod_time <- mapM (getModificationTime . (dir </>)) param_files
-            let latest = fst $ last $ sortOn snd (zip param_files mod_time)
-            return $ Just $ dir </> dropExtension latest
+            mod_time <- mapM (getModificationTime . (sdir </>)) param_files
+            case lastMaybe $ sortOn snd (zip param_files mod_time) of
+                Nothing -> return Nothing
+                Just (latest, _) -> return $ Just $ sdir </> dropExtension latest
 
-printInLine :: String -> IO ()
+printInLine :: Text -> IO ()
 printInLine str = do
-    putStr $ "\r\ESC[K" ++ str
+    putStr $ "\r\ESC[K" ++ T.unpack str
     hFlush stdout
 

@@ -9,19 +9,18 @@ module MXNet.NN.Optimizer (
     OptimizerTag(..)
 ) where
 
-import MXNet.Base hiding (Symbol)
-import qualified MXNet.Base.Operators.NDArray as A
-
-import Data.IORef
+import RIO
+import RIO.State
+import qualified RIO.HashMap as M
 import GHC.TypeLits
 import GHC.Exts (Constraint)
-import qualified Data.HashMap.Strict as M
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.State.Class (MonadState)
 import Control.Lens (use, (.=))
+
+import MXNet.Base hiding (Symbol)
+import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.LrScheduler (LrScheduler(..))
-import MXNet.NN.TaggedState (Tagged, untag)
-import MXNet.NN.Types (TaggedModuleState, mod_statistics, Statistics, stat_num_upd, stat_last_lr)
+import MXNet.NN.TaggedState (untag)
+import MXNet.NN.Types (TaggedModuleState, mod_statistics, stat_num_upd, stat_last_lr)
 
 -- | Abstract Optimizer type class
 class Optimizer (opt :: * -> *) where
@@ -36,7 +35,7 @@ class Optimizer (opt :: * -> *) where
     -- | run the optimizer with the input & expected tensor
     optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) m, MonadIO m)
              => opt dtype                            -- optimizer
-             -> String                               -- symbol name to optimize
+             -> Text                                 -- symbol name to optimize
              -> NDArray dytpe                        -- parameter
              -> NDArray dtype                        -- gradient
              -> m ()
@@ -68,7 +67,7 @@ instance Optimizer SGD_Opt where
 -- | SGD with momentum optimizer
 data SGD_Mom_Opt dtype where
     SGD_Mom_Opt :: (LrScheduler sch, OptimizerCst SGD_Mom_Opt dtype args)
-                => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) args -> (IORef (M.HashMap String (NDArray dtype))) -> SGD_Mom_Opt dtype
+                => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) args -> (IORef (M.HashMap Text (NDArray dtype))) -> SGD_Mom_Opt dtype
 
 type instance OptimizerSym SGD_Mom_Opt = "sgd_mom_update(ndarray)"
 -- 1.0.0 type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient"]
@@ -101,7 +100,7 @@ instance Optimizer SGD_Mom_Opt where
 -- | ADAM optmizer
 data ADAM_Opt dtype where
     ADAM_Opt :: (LrScheduler sch, OptimizerCst ADAM_Opt dtype args)
-            => sch -> ArgsHMap (OptimizerSym ADAM_Opt) args -> IORef (M.HashMap String (NDArray dtype, NDArray dtype)) -> ADAM_Opt dtype
+            => sch -> ArgsHMap (OptimizerSym ADAM_Opt) args -> IORef (M.HashMap Text (NDArray dtype, NDArray dtype)) -> ADAM_Opt dtype
 
 type instance OptimizerSym ADAM_Opt = "adam_update(ndarray)"
 -- 1.0.0 type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient"]

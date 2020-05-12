@@ -3,7 +3,8 @@
 module MXNet.NN.DataIter.Class where
 
 import GHC.Exts (Constraint)
-import Control.Monad.Trans (MonadTrans)
+import RIO
+import RIO.Prelude.Types (MonadTrans)
 
 -- Available instances include 'LVec' and mxnet data-iters in package <https://github.com/pierric/mxnet-dataiter mxnet-dataiter>
 class Dataset (d :: (* -> *) -> * -> *) where

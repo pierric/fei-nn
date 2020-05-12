@@ -3,18 +3,15 @@
 {-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.Session where
 
-import qualified Control.Monad.State.Strict as ST
+import RIO
+import qualified RIO.State as ST
 import qualified GHC.TypeLits as L
 import qualified Data.Type.Product as DT
 import qualified Data.Type.Index as DT
-import qualified Data.HashMap.Strict as M
 import Data.Kind (Constraint)
-import Control.Lens ((^.))
-import Control.Monad (when)
-import Control.Monad.IO.Class (MonadIO)
 
 import MXNet.Base
-import MXNet.NN.Types (Module, ModuleSet, ModuleState, TaggedModuleState, Parameter(..), mod_params, mod_symbol)
+import MXNet.NN.Types (Module, ModuleSet, ModuleState, TaggedModuleState)
 import MXNet.NN.TaggedState (liftSub, toPair)
 
 class MonadIO sess => Session sess where
@@ -38,7 +35,7 @@ instance (DT.Every L.KnownSymbol t, MonadIO m) => Session (ModuleSet t a m) wher
       where
         walk :: DT.Every L.KnownSymbol t => DT.Prod (TaggedModuleState a) t -> [(String, ModuleState a)]
         walk DT.Ø = []
-        walk (v DT.:< rem) = toPair v : walk rem
+        walk (v DT.:< rest) = toPair v : walk rest
 
 instance (L.KnownSymbol t, MonadIO m) => Session (Module t a m) where
     type SessionDType (Module t a m) = a
@@ -50,15 +47,45 @@ instance (L.KnownSymbol t, MonadIO m) => Session (Module t a m) where
     getStates = (:[]) . toPair <$> ST.get
 
 class CallbackClass c where
-    begOfBatch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
+    begOfBatch :: ( L.KnownSymbol t
+                  , DType a
+                  , MonadIO m
+                  , MonadReader env m
+                  , HasLogFunc env
+                  , HasCallStack)
+        => Int -> Int -> c -> Module t a m ()
     begOfBatch _ _ _ = return ()
-    endOfBatch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
+    endOfBatch :: ( L.KnownSymbol t
+                  , DType a
+                  , MonadIO m
+                  , MonadReader env m
+                  , HasLogFunc env
+                  , HasCallStack)
+        => Int -> Int -> c -> Module t a m ()
     endOfBatch _ _ _ = return ()
-    begOfEpoch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
+    begOfEpoch :: ( L.KnownSymbol t
+                  , DType a
+                  , MonadIO m
+                  , MonadReader env m
+                  , HasLogFunc env
+                  , HasCallStack)
+        => Int -> Int -> c -> Module t a m ()
     begOfEpoch _ _ _ = return ()
-    endOfEpoch :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
+    endOfEpoch :: ( L.KnownSymbol t
+                  , DType a
+                  , MonadIO m
+                  , MonadReader env m
+                  , HasLogFunc env
+                  , HasCallStack)
+        => Int -> Int -> c -> Module t a m ()
     endOfEpoch _ _ _ = return ()
-    endOfVal   :: (L.KnownSymbol t, DType a, MonadIO m) => Int -> Int -> c -> Module t a m ()
+    endOfVal   :: ( L.KnownSymbol t
+                  , DType a
+                  , MonadIO m
+                  , MonadReader env m
+                  , HasLogFunc env
+                  , HasCallStack)
+        => Int -> Int -> c -> Module t a m ()
     endOfVal   _ _ _ = return ()
 data Callback where
     Callback :: CallbackClass a => a -> Callback

@@ -1,15 +1,13 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE QuasiQuotes #-}
 module MXNet.NN.Initializer where
 
-import Control.Monad.Trans.Resource (MonadThrow(..))
+import RIO
+import qualified RIO.Vector.Storable as SV
+import qualified RIO.NonEmpty as RNE
+import qualified RIO.Text as T
 
 import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
-import qualified Data.Vector.Storable as SV
-
 import MXNet.NN.Types
 import MXNet.NN.Utils
 
@@ -25,37 +23,39 @@ ones  = constant 1
 constant :: DType a => a -> Initializer a
 constant val _ shp cxt = makeNDArray shp cxt $ SV.replicate (product shp) val
 
-uniform :: forall a. (DType a, HasEnum (DTypeName a) '["None", "float16" ,"float32", "float64"]) 
+uniform :: forall a. (DType a, HasEnum (DTypeName a) '["None", "float16" ,"float32", "float64"])
     => Float -> Initializer a
-uniform sca _ shp cxt = NDArray . head <$> (A._random_uniform 
-                               (  #low    := (-sca) 
+uniform sca _ shp cxt = NDArray <$> sing A._random_uniform
+                               (  #low    := (-sca)
                                .& #high   := sca
-                               .& #shape  := shp
+                               .& #shape  := RNE.toList shp
                                .& #ctx    := formatContext cxt
                                .& #dtype  := EnumType (typename (undefined :: a))
-                               .& Nil))
+                               .& Nil)
 
-normal :: forall a. (DType a, HasEnum (DTypeName a) '["None", "float16" ,"float32", "float64"]) 
+normal :: forall a. (DType a, HasEnum (DTypeName a) '["None", "float16" ,"float32", "float64"])
     => Float -> Initializer a
-normal sigma _ shp cxt = NDArray . head <$> (A._random_normal
+normal sigma _ shp cxt = NDArray <$> sing A._random_normal
                                (  #loc    := (0 :: Float)
                                .& #scale  := sigma
-                               .& #shape  := shp
+                               .& #shape  := RNE.toList shp
                                .& #ctx    := formatContext cxt
                                .& #dtype  := EnumType (typename (undefined :: a))
-                               .& Nil))
+                               .& Nil)
 
 data XavierFactor = XavierAvg | XavierIn | XavierOut
 data XavierRandom = XavierUniform | XavierGaussian
 
 xavier :: (DType a, HasEnum (DTypeName a) '["None", "float16" ,"float32", "float64"])
     => Float -> XavierRandom -> XavierFactor -> Initializer a
-xavier magnitude distr factor name (shp@[ofan,ifan]) cxt =
-    let scale = case factor of 
-                  XavierIn  -> sqrt (magnitude / fromIntegral ifan)
-                  XavierOut -> sqrt (magnitude / fromIntegral ofan)
-                  XavierAvg -> sqrt (magnitude * 2.0 / fromIntegral (ifan + ofan))
-    in case distr of
-         XavierUniform -> uniform scale name shp cxt
-         XavierGaussian-> normal  scale name shp cxt
-xavier _ _ _ _ shp _ = throwM $ InvalidArgument $ "invalid shape " ++ show  shp ++ " for xavier initializer"
+xavier magnitude distr factor name shp cxt
+    | [ofan,ifan] <- RNE.toList shp =
+        let scale = case factor of
+                      XavierIn  -> sqrt (magnitude / fromIntegral ifan)
+                      XavierOut -> sqrt (magnitude / fromIntegral ofan)
+                      XavierAvg -> sqrt (magnitude * 2.0 / fromIntegral (ifan + ofan))
+        in case distr of
+             XavierUniform -> uniform scale name shp cxt
+             XavierGaussian-> normal  scale name shp cxt
+    | otherwise = throwM $ InvalidArgument $
+        T.concat ["invalid shape ", formatShape shp, " for xavier initializer"]
