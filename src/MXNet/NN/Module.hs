@@ -1,6 +1,6 @@
 module MXNet.NN.Module where
 
-import RIO hiding (evaluate)
+import RIO
 import qualified RIO.HashMap as M
 import qualified RIO.HashSet as S
 import qualified RIO.NonEmpty as RNE ((<|))
@@ -174,7 +174,7 @@ fitAndEval opt datAndLbl metric = do
     update opt M.empty
     exec <- use (untag . mod_executor)
     out  <- liftIO $ execGetOutputs exec
-    eval_results <- evaluate metric datAndLbl out
+    eval_results <- evalMetric metric datAndLbl out
     untag . mod_scores %= M.union eval_results
 
 
@@ -209,7 +209,7 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
             -- forM_ callbacks (begOfBatch i batchSize)
             let binding = make_binding vars item
             fitAndEval opt binding trainMetricData
-            eval <- format trainMetricData
+            eval <- formatMetric trainMetricData
             lift . logInfo . display $ sformat (int % int % stext) i total eval
             -- forM_ callbacks (endOfBatch i batchSize)
 
@@ -221,8 +221,8 @@ fitDataset trainDataset valDataset make_binding opt metric epochs = do
             let binding = make_binding vars item
             -- TODO: it is bad to pass labels to forwardOnly
             out <- forwardOnly binding
-            evaluate valMetricData binding out
-        eval <- format valMetricData
+            evalMetric valMetricData binding out
+        eval <- formatMetric valMetricData
         lift . logInfo $ display eval
         --
         -- forM_ callbacks (endOfVal epochInd total)
