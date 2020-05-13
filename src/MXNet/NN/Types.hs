@@ -7,7 +7,7 @@ module MXNet.NN.Types where
 import RIO
 import RIO.HashMap (HashMap)
 import RIO.HashSet (HashSet)
-import qualified RIO.State as ST
+import RIO.State (StateT)
 import Control.Lens (makeLenses)
 import Data.Typeable (Typeable)
 import qualified Data.Type.Product as DT
@@ -52,9 +52,9 @@ data Exc = MismatchedShapeOfSym Text (NonEmpty Int) (NonEmpty Int)
     deriving (Show, Typeable)
 instance Exception Exc
 
-type TaggedModuleState a = Tagged (ModuleState a)
-type Module tag a m = ST.StateT (TaggedModuleState a tag) m
-type ModuleSet tags a m = ST.StateT (DT.Prod (TaggedModuleState a) tags) m
+type TaggedModuleState dty = Tagged (ModuleState dty)
+type Module tag dty = StateT (TaggedModuleState dty tag)
+type ModuleSet tags dty = StateT (DT.Prod (TaggedModuleState dty) tags)
 
 data ModuleState a = ModuleState {
       _mod_symbol       :: Symbol a

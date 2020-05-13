@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
 module MXNet.NN.Session where
 
@@ -14,37 +15,38 @@ import MXNet.Base
 import MXNet.NN.Types (Module, ModuleSet, ModuleState, TaggedModuleState)
 import MXNet.NN.TaggedState (liftSub, toPair)
 
-class MonadIO sess => Session sess where
-    type SessionDType sess
-    type SessionState sess
-    type SessionMonad sess :: * -> *
-    type SessionHasModule sess (t :: L.Symbol) a :: Constraint
+class Session (sess :: (* -> *) -> * -> *) (sst :: *) | sess -> sst, sst -> sess where
+    type SessionDType sst
+    type SessionHasModule sst (t :: L.Symbol) :: Constraint
+    withSession   :: MonadIO m => MVar sst -> sess m r -> m r
+    subSession    :: MonadIO m => SessionHasModule sst t => Module t (SessionDType sst) m r -> sess m r
+    sessionStates :: MonadIO m => sess m [(String, ModuleState (SessionDType sst))]
 
-    train :: SessionState sess -> sess r -> SessionMonad sess r
-    runModule :: SessionHasModule sess t a => Module t a (SessionMonad sess) r -> sess r
-    getStates :: sess [(String, ModuleState (SessionDType sess))]
-
-instance (DT.Every L.KnownSymbol t, MonadIO m) => Session (ModuleSet t a m) where
-    type SessionDType (ModuleSet t a m) = a
-    type SessionState (ModuleSet t a m) = DT.Prod (TaggedModuleState a) t
-    type SessionMonad (ModuleSet t a m) = m
-    type SessionHasModule (ModuleSet t a m) t' a' = (DT.Elem t t', a ~ a')
-    train = flip ST.evalStateT
-    runModule = liftSub
-    getStates = walk <$> ST.get
+instance (DT.Every L.KnownSymbol t) => Session (ModuleSet t a) (DT.Prod (TaggedModuleState a) t) where
+    type SessionDType (DT.Prod (TaggedModuleState a) t) = a
+    type SessionHasModule (DT.Prod (TaggedModuleState a) t) t' = DT.Elem t t'
+    withSession var proc = do
+        st <- liftIO $ takeMVar var
+        (rt, st) <- ST.runStateT proc st
+        liftIO $ putMVar var st
+        return rt
+    subSession = liftSub
+    sessionStates = walk <$> ST.get
       where
         walk :: DT.Every L.KnownSymbol t => DT.Prod (TaggedModuleState a) t -> [(String, ModuleState a)]
         walk DT.Ø = []
         walk (v DT.:< rest) = toPair v : walk rest
 
-instance (L.KnownSymbol t, MonadIO m) => Session (Module t a m) where
-    type SessionDType (Module t a m) = a
-    type SessionState (Module t a m) = TaggedModuleState a t
-    type SessionMonad (Module t a m) = m
-    type SessionHasModule (Module t a m) t' a' = (t ~ t', a ~ a')
-    train = flip ST.evalStateT
-    runModule = id
-    getStates = (:[]) . toPair <$> ST.get
+instance (L.KnownSymbol t) => Session (Module t a) (TaggedModuleState a t) where
+    type SessionDType (TaggedModuleState a t) = a
+    type SessionHasModule (TaggedModuleState a t) t' = t ~ t'
+    withSession var proc = do
+        st <- liftIO $ takeMVar var
+        (rt, st) <- ST.runStateT proc st
+        liftIO $ putMVar var st
+        return rt
+    subSession = id
+    sessionStates = (:[]) . toPair <$> ST.get
 
 class CallbackClass c where
     begOfBatch :: ( L.KnownSymbol t
