@@ -9,7 +9,6 @@ import Data.Maybe (mapMaybe)
 import RIO.Directory (listDirectory, getModificationTime)
 import RIO.FilePath ((</>), dropExtension)
 import qualified RIO.HashMap as M
-import System.IO (stdout, putStr)
 import Control.Lens (use)
 import Formatting
 
@@ -90,7 +89,7 @@ loadState weights_filename ignores = do
                 logWarn . display $ sformat
                     ("a variable (" % stext % ") found in the state file.") name
 
-lastSavedState :: MonadIO m => Text -> Module t a m (Maybe FilePath)
+lastSavedState :: MonadIO m => Text -> m (Maybe FilePath)
 lastSavedState dir = liftIO $ do
     let sdir = T.unpack dir
     files <- listDirectory sdir
@@ -102,9 +101,4 @@ lastSavedState dir = liftIO $ do
             case lastMaybe $ sortOn snd (zip param_files mod_time) of
                 Nothing -> return Nothing
                 Just (latest, _) -> return $ Just $ sdir </> dropExtension latest
-
-printInLine :: Text -> IO ()
-printInLine str = do
-    putStr $ "\r\ESC[K" ++ T.unpack str
-    hFlush stdout
 

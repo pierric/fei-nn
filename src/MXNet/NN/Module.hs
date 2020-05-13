@@ -1,10 +1,12 @@
 module MXNet.NN.Module where
 
+import GHC.TypeLits (KnownSymbol)
 import RIO
+import RIO.List (zipWith3)
+import RIO.State (StateT)
 import qualified RIO.HashMap as M
 import qualified RIO.HashSet as S
 import qualified RIO.NonEmpty as RNE ((<|))
-import RIO.List (zipWith3)
 import Control.Lens.Setter ((.=), (+=), (%=))
 import Control.Lens (use, (^?!), ix)
 import Formatting (sformat, (%), int, stext)
@@ -13,6 +15,7 @@ import MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
 import MXNet.NN.Types
 import MXNet.NN.TaggedState (Tagged(..), untag)
+import MXNet.NN.Session (withSession)
 import MXNet.NN.Optimizer (Optimizer, optimize)
 import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..))
 import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
@@ -21,6 +24,7 @@ import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
 data UnkownShapeOrScalar = UnkownShapeOrScalar Text
     deriving (Typeable, Show)
 instance Exception UnkownShapeOrScalar
+
 
 initialize :: forall tag dty. DType dty => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
@@ -88,6 +92,7 @@ initialize symbol config = do
     checkTensorShape (name, SScalar)   = throwIO $ UnkownShapeOrScalar name
     checkTensorShape (name, STensor s) = return (name, s)
 
+
 bind :: DType dty => Symbol dty -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
@@ -108,14 +113,13 @@ bind symbol context params trainable = do
         aux_arg_aux  = map (_param_aux . (params ^?!) . ix) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
+
 adapt :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
     context <- use $ untag . mod_context
     fixed   <- use $ untag . mod_fixed_args
-    -- shapes  <- M.toList <$> use mod_input_shapes
-    -- shapes' <- lift $ mapM (runKleisli $ second $ Kleisli ndshape) $ M.toList inputs
     shapes  <- use $ untag . mod_input_shapes
     shapes' <- liftIO $ mapM ndshape inputs
 
@@ -141,7 +145,7 @@ adapt inputs = do
           Just (ParameterV dst) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
           _ -> return ()
 
-forwardOnly :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
+forwardOnly :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
 forwardOnly inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -149,7 +153,7 @@ forwardOnly inputs = do
         execForward exec False
         execGetOutputs exec
 
-fit :: forall tag dty m. (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
+fit :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 fit inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -157,9 +161,9 @@ fit inputs = do
         execForward exec True
         execBackward exec []
 
-update :: forall tag dty opt m any. (Optimizer opt, DType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
+update :: (Optimizer opt, DType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
 update opt blacklist = do
-    params <- use (untag . mod_params)
+    params <- use $ untag . mod_params
     forM_ (M.toList params) $ \case
         (k, ParameterG weig grad) | not (M.member k blacklist) -> do
             optimize opt k weig grad
@@ -167,62 +171,63 @@ update opt blacklist = do
     untag . mod_statistics . stat_num_upd += 1
 
 
-fitAndEval :: forall tag dty opt mtr m. (DType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
-           => opt dty -> M.HashMap Text (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
+fitAndEval :: (DType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
+    => opt dty -> M.HashMap Text (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
 fitAndEval opt datAndLbl metric = do
     fit datAndLbl
     update opt M.empty
-    exec <- use (untag . mod_executor)
+    exec <- use $ untag . mod_executor
     out  <- liftIO $ execGetOutputs exec
     eval_results <- evalMetric metric datAndLbl out
     untag . mod_scores %= M.union eval_results
 
 
-fitDataset :: (Dataset d, DatasetProp d e, DType a,
+fitDataset :: (KnownSymbol tag, Dataset d, DatasetProp d e, DType a,
         MonadIO m, MonadThrow m, MonadReader env m, HasLogFunc env,
         HasCallStack,
-        DatasetMonadConstraint d (Module t a m),
+        DatasetMonadConstraint d m,
         Optimizer opt, EvalMetricMethod mtr)
-    => d (Module t a m) e
-    -> d (Module t a m) e
+    => TaggedModuleState a tag
+    -> d m e
+    -> d m e
     -> ([Text] -> e -> M.HashMap Text (NDArray a))
     -> opt a
     -> mtr a
     -> Int
-    -> Module t a m ()
-fitDataset trainDataset valDataset make_binding opt metric epochs = do
+    -> m ()
+fitDataset sess trainDataset valDataset make_binding opt metric epochs = do
     -- callbacks <- use sess_callbacks
 
-    vars <- M.keys <$> use (untag . mod_input_shapes)
-
-    total     <- sizeD trainDataset
+    sess_mvar <- newMVar sess
+    let variables = M.keys $ sess ^. untag . mod_input_shapes
+    total <- sizeD trainDataset
     -- batchSize <- batchSizeD trainDataset >>= maybe (throwM DatasetOfUnknownBatchSize) return
 
-    lift . logInfo $ display ("[Train]" :: Text)
+    logInfo $ display ("[Train]" :: Text)
     forM_ [1..epochs] $ \epochInd -> do
         trainMetricData <- newMetric "train" metric
 
-        lift . logInfo . display $ sformat ("epoch " % int) epochInd
+        logInfo . display $ sformat ("epoch " % int) epochInd
         -- forM_ callbacks (begOfEpoch epochInd total)
 
-        void $ forEachD_i trainDataset $ \(i, item) -> do
+        void $ forEachD_i trainDataset $ \(i, item) -> withSession sess_mvar  $ do
             -- forM_ callbacks (begOfBatch i batchSize)
-            let binding = make_binding vars item
+            let binding = make_binding variables  item
             fitAndEval opt binding trainMetricData
             eval <- formatMetric trainMetricData
-            lift . logInfo . display $ sformat (int % int % stext) i total eval
+            logInfo . display $ sformat (int % int % stext) i total eval
             -- forM_ callbacks (endOfBatch i batchSize)
 
         -- forM_ callbacks (endOfEpoch epochInd total)
 
-        lift . logInfo $ display ("[Validate]" :: Text)
+        logInfo $ display ("[Validate]" :: Text)
         valMetricData <- newMetric "val" metric
-        void $ forEachD valDataset $ \item -> do
-            let binding = make_binding vars item
+        void $ forEachD valDataset $ \item -> withSession sess_mvar  $ do
+            let binding = make_binding variables  item
             -- TODO: it is bad to pass labels to forwardOnly
             out <- forwardOnly binding
             evalMetric valMetricData binding out
         eval <- formatMetric valMetricData
-        lift . logInfo $ display eval
+        logInfo $ display eval
         --
         -- forM_ callbacks (endOfVal epochInd total)

@@ -16,6 +16,9 @@ import Data.Proxy (Proxy(..))
 newtype Tagged a (t :: L.Symbol) = Tagged {_untag :: a} deriving Show
 makeLenses ''Tagged
 
+
+-- liftSub :: forall k (f :: k -> *) ss t m a. (Elem ss t, Monad m) => ReaderT (f t) m a -> ReaderT (Prod f ss) m a
+-- liftSub (ReaderT m) = ReaderT (m . index elemIndex)
 liftSub :: forall k (f :: k -> *) s1 s2 m a. (Elem s2 s1, Monad m) => StateT (f s1) m a -> StateT (Prod f s2) m a
 liftSub (StateT m1) = StateT $ \s -> do
     (a, si) <- m1 $ index elemIndex s
@@ -26,6 +29,7 @@ liftSub (StateT m1) = StateT $ \s -> do
 modify :: Index as a -> f a -> Prod f as -> Prod f as
 modify IZ new (_ :< remainder) = new :< remainder
 modify (IS s) new (item :< remainder) = item :< modify s new remainder
+
 
 toPair :: forall t a. L.KnownSymbol t => Tagged a t -> (String, a)
 toPair (Tagged a)= (L.symbolVal (Proxy :: Proxy t), a)
