@@ -89,11 +89,12 @@ loadState weights_filename ignores = do
                 logWarn . display $ sformat
                     ("a variable (" % stext % ") found in the state file.") name
 
-lastSavedState :: MonadIO m => Text -> m (Maybe FilePath)
-lastSavedState dir = liftIO $ do
+lastSavedState :: MonadIO m => Text -> Text -> m (Maybe FilePath)
+lastSavedState dir prefix = liftIO $ do
     let sdir = T.unpack dir
     files <- listDirectory sdir
-    let param_files = filter (T.isSuffixOf ".params" . T.pack) files
+    let match name = T.isSuffixOf ".params" name && T.isPrefixOf prefix name
+        param_files = filter (match . T.pack) files
     if null param_files
         then return Nothing
         else do
