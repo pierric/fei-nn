@@ -50,6 +50,7 @@ Library
                             TypeApplications,
                             DataKinds,
                             ExplicitForAll,
+                            ExistentialQuantification,
                             NoImplicitPrelude
     if impl(ghc >= 8.6)
         default-extensions: NoMonadFailDesugaring
@@ -71,4 +72,5 @@ Library
                           , wl-pprint-text
                           , repa
                           , rio
+                          , uuid
                           , fei-base
