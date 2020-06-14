@@ -1,24 +1,23 @@
 module MXNet.NN.Module where
 
-import GHC.TypeLits (KnownSymbol)
-import RIO
-import RIO.List (zipWith3)
-import RIO.State (StateT)
-import qualified RIO.HashMap as M
-import qualified RIO.HashSet as S
-import qualified RIO.NonEmpty as RNE ((<|))
-import Control.Lens.Setter ((.=), (+=), (%=))
-import Control.Lens (use, (^?!), ix)
-import Formatting (sformat, (%), int, stext)
+import           Control.Lens                 (ix, use, (^?!))
+import           Control.Lens.Setter          ((%=), (+=), (.=))
+import           Formatting                   (int, sformat, stext, (%))
+import           GHC.TypeLits                 (KnownSymbol)
+import           RIO
+import qualified RIO.HashMap                  as M
+import qualified RIO.HashSet                  as S
+import           RIO.List                     (zipWith3)
 
-import MXNet.Base
+import           MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
-import MXNet.NN.Types
-import MXNet.NN.TaggedState (Tagged(..), untag)
-import MXNet.NN.Session (withSession)
-import MXNet.NN.Optimizer (Optimizer, optimize)
-import MXNet.NN.DataIter.Class (Dataset(..), DatasetProp(..))
-import MXNet.NN.EvalMetric (EvalMetricMethod(..), MetricData)
+import           MXNet.NN.DataIter.Class      (Dataset (..), DatasetProp (..))
+import           MXNet.NN.EvalMetric          (EvalMetricMethod (..),
+                                               MetricData)
+import           MXNet.NN.Optimizer           (Optimizer, optimize)
+import           MXNet.NN.Session             (withSession)
+import           MXNet.NN.TaggedState         (Tagged (..), untag)
+import           MXNet.NN.Types
 
 
 data UnkownShapeOrScalar = UnkownShapeOrScalar Text
@@ -37,7 +36,7 @@ initialize symbol config = do
         fixed = (config ^. cfg_fixed_params) `S.difference`
                 (S.fromList $ M.keys input_shapes ++ label_names)
 
-    (args, _, auxs, r) <- inferShape symbol (M.toList spec1)
+    (args, _, auxs, _) <- inferShape symbol (M.toList spec1)
     arg_with_shp <- M.fromList <$> mapM checkTensorShape args
     aux_with_shp <- M.fromList <$> mapM checkTensorShape auxs
     ---------------------
