@@ -25,7 +25,7 @@ data UnkownShapeOrScalar = UnkownShapeOrScalar Text
 instance Exception UnkownShapeOrScalar
 
 
-initialize :: forall tag dty. DType dty => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
+initialize :: forall tag dty. DType dty => SymbolHandle -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
      -- give a initial batch_size = 1 for the placeholders
     let spec1 = M.map (shapeCons 1) $ M.difference input_shapes initializers
@@ -92,7 +92,7 @@ initialize symbol config = do
     checkTensorShape (name, STensor s) = return (name, s)
 
 
-bind :: DType dty => Symbol dty -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
+bind :: DType dty => SymbolHandle -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
     auxnames <- listAuxiliaryStates symbol

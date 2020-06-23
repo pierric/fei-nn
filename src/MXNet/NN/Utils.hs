@@ -1,22 +1,27 @@
 {-# LANGUAGE RecordWildCards #-}
 module MXNet.NN.Utils where
 
-import RIO
-import qualified RIO.Text as T
-import qualified RIO.NonEmpty as RNE
-import RIO.List (sortOn, lastMaybe)
-import Data.Maybe (mapMaybe)
-import RIO.Directory (listDirectory, getModificationTime)
-import RIO.FilePath ((</>), dropExtension)
-import qualified RIO.HashMap as M
-import Control.Lens (use)
-import Formatting
+import           Control.Lens                 (use)
+import           Data.Maybe                   (mapMaybe)
+import           Formatting
+import           RIO
+import           RIO.Directory                (getModificationTime,
+                                               listDirectory)
+import           RIO.FilePath                 (dropExtension, (</>))
+import qualified RIO.HashMap                  as M
+import           RIO.List                     (lastMaybe, sortOn)
+import qualified RIO.NonEmpty                 as RNE
+import qualified RIO.Text                     as T
 
-import MXNet.Base (Context(..), NDArray(..), Symbol(..), (.&), ArgOf(..), HMap(..))
-import MXNet.Base.Raw (mxSymbolSaveToFile, mxNDArraySave, mxNDArrayLoad)
+import           MXNet.Base                   (ArgOf (..), Context (..),
+                                               HMap (..), NDArray (..),
+                                               Symbol (..), (.&))
 import qualified MXNet.Base.Operators.NDArray as A
-import MXNet.NN.Types (Module, Parameter(..), mod_params, mod_symbol)
-import MXNet.NN.TaggedState (untag)
+import           MXNet.Base.Raw               (mxNDArrayLoad, mxNDArraySave,
+                                               mxSymbolSaveToFile)
+import           MXNet.NN.TaggedState         (untag)
+import           MXNet.NN.Types               (Module, Parameter (..),
+                                               mod_params, mod_symbol)
 
 -- | format a shape
 formatShape :: NonEmpty Int -> Text
@@ -60,7 +65,7 @@ saveState save_symbol name = do
     symbol <- use (untag . mod_symbol)
     let modelParams = mapMaybe getModelParam $ M.toList params
     liftIO $ do
-        when save_symbol $ mxSymbolSaveToFile (T.pack $ name ++ ".json") (unSymbol symbol)
+        when save_symbol $ mxSymbolSaveToFile (T.pack $ name ++ ".json") symbol
         mxNDArraySave (T.pack $ name ++ ".params") modelParams
   where
     getModelParam (_,   ParameterV _)   = Nothing

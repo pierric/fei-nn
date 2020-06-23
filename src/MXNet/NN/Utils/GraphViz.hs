@@ -5,37 +5,38 @@ module MXNet.NN.Utils.GraphViz (
     GV.GraphvizOutput(..)
 ) where
 
-import RIO
-import RIO.Partial (fromJust)
-import qualified RIO.Map as M
-import qualified RIO.Text as T
-import qualified RIO.Text.Lazy as TL
-import Data.Aeson
-import Data.Aeson.Types
-import Data.Typeable (Typeable)
-import Numeric (readHex)
-import qualified Data.GraphViz as GV
+import           Data.Aeson
+import           Data.Aeson.Types
+import qualified Data.GraphViz                     as GV
 import qualified Data.GraphViz.Attributes.Complete as GV
-import qualified Data.GraphViz.Types.Monadic as GVM
-import qualified Data.GraphViz.Types.Generalised as GVM
-import Formatting
+import qualified Data.GraphViz.Types.Generalised   as GVM
+import qualified Data.GraphViz.Types.Monadic       as GVM
+import           Data.Typeable                     (Typeable)
+import           Formatting
+import           Numeric                           (readHex)
+import           RIO
+import qualified RIO.Map                           as M
+import           RIO.Partial                       (fromJust)
+import qualified RIO.Text                          as T
+import qualified RIO.Text.Lazy                     as TL
 
-import MXNet.Base
+import           MXNet.Base
 
 -- The program `dot` must be found in the PATH.
 
-dotPlot :: DType a => Symbol a -> GV.GraphvizOutput -> FilePath -> IO ()
+dotPlot :: SymbolHandle -> GV.GraphvizOutput -> FilePath -> IO ()
 dotPlot sym output filepath = do
     gr <- dotGraph sym
     _  <- GV.addExtension (GV.runGraphvizCommand GV.Dot gr) output filepath
     return ()
 
-data JSNode = JSNode {
-    _node_op :: Text,
-    _node_name :: Text,
-    _node_attrs :: Maybe (M.Map Text Text),
-    _node_inputs :: [[Int]]
-} deriving (Show)
+data JSNode = JSNode
+    { _node_op     :: Text
+    , _node_name   :: Text
+    , _node_attrs  :: Maybe (M.Map Text Text)
+    , _node_inputs :: [[Int]]
+    }
+    deriving (Show)
 
 instance FromJSON JSNode where
     parseJSON (Object v) = JSNode <$> v .:  "op"
@@ -44,9 +45,10 @@ instance FromJSON JSNode where
                                   <*> v .:  "inputs"
     parseJSON invalid    = typeMismatch "JSNode" invalid
 
-data JSGraph = JSGraph {
-    _symbol_nodes :: [JSNode]
-} deriving (Show)
+data JSGraph = JSGraph
+    { _symbol_nodes :: [JSNode]
+    }
+    deriving (Show)
 
 instance FromJSON JSGraph where
     parseJSON (Object v) = JSGraph <$> v .: "nodes"
@@ -54,8 +56,8 @@ instance FromJSON JSGraph where
 
 -- plot_network
 -- https://github.com/apache/incubator-mxnet/blob/master/python/mxnet/visualization.py#L196
-dotGraph :: DType a => Symbol a -> IO (GVM.DotGraph Int)
-dotGraph (Symbol sym) = do
+dotGraph :: SymbolHandle -> IO (GVM.DotGraph Int)
+dotGraph sym = do
     js <- mxSymbolSaveToJSON sym
     auxnodes <- mxSymbolListAuxiliaryStates sym
     case eitherDecodeStrict $ T.encodeUtf8 js of
