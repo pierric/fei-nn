@@ -1,12 +1,12 @@
 {-# LANGUAGE UndecidableInstances #-}
 module MXNet.NN.Layer (
   Layer,
+  runLayerBuilder,
   dumpCurrentScope,
-  makeName,
-  sequential,
-  unique,
+  sequential, sequential',
+  unique, unique',
   named,
-  subscope,
+  subscope, subscope_named, subscope_next_name,
   prim,
   variable,
   convolution,
@@ -14,6 +14,7 @@ module MXNet.NN.Layer (
   pooling,
   activation,
   softmaxoutput,
+  softmax,
   batchnorm,
   cast,
   plus,
@@ -21,6 +22,7 @@ module MXNet.NN.Layer (
   identity,
   dropout,
   reshape,
+  add_, sub_, mul_, div_,
 ) where
 
 import qualified Data.UUID                   as UUID
@@ -39,6 +41,9 @@ class Show nb => NameBuilder nb where
     nextName :: MonadIO m => nb -> m Text
 
 type Layer = ST.StateT [(Maybe Text, SomeNameBuilder)] IO
+
+runLayerBuilder :: Layer a -> IO a
+runLayerBuilder = flip ST.evalStateT []
 
 data SomeNameBuilder = forall nb . (NameBuilder nb) => SomeNameBuilder nb
 
@@ -92,67 +97,77 @@ dumpCurrentScope = do
     scopes <- ST.get
     return $ tshow scopes
 
-sequential :: Maybe Text -> Layer a -> Layer a
+sequential :: Text -> Layer a -> Layer a
 sequential name mk = do
     nb <- liftIO $ SequNameBuilder <$> newIORef 0
-    scopes <- ST.get
-    ST.put ((name, SomeNameBuilder nb) : scopes)
-    a <- mk
-    ST.put scopes
-    return a
+    subscope (Just name, SomeNameBuilder nb) mk
+
+sequential' :: Layer a -> Layer a
+sequential' mk = do
+    nb <- liftIO $ SequNameBuilder <$> newIORef 0
+    subscope (Nothing, SomeNameBuilder nb) mk
 
 unique :: Text -> Layer a -> Layer a
-unique name mk = do
-    scopes <- ST.get
-    ST.put ((Just name, SomeNameBuilder UUIDNameBuilder) : scopes)
-    a <- mk
-    ST.put scopes
-    return a
+unique name = subscope (Just name, SomeNameBuilder UUIDNameBuilder)
+
+unique' :: Layer a -> Layer a
+unique' = subscope (Nothing, SomeNameBuilder UUIDNameBuilder)
 
 named :: Text -> Layer a -> Layer a
 named name mk = do
     scopes <- ST.get
     fresh <- newIORef True
-    ST.put ((Just name, SomeNameBuilder (OnceNameBuilder name fresh)) : scopes)
+    ST.put ((Nothing, SomeNameBuilder (OnceNameBuilder name fresh)) : scopes)
     a <- mk
     ST.put scopes
     return a
 
-subscope :: Layer a -> Layer a
-subscope mk = do
-    scopes@((_, nb) : _) <- ST.get
-    name <- nextName nb
-    ST.put ((Just name, SomeNameBuilder UUIDNameBuilder) : scopes)
-    a <- mk
-    ST.put scopes
-    return a
+getNextName :: Layer Text
+getNextName = do
+    ((_, nb) : _) <- ST.get
+    nextName nb
 
-makeName :: Layer Text
-makeName = do
-    scopes@((_, nb) : _) <- ST.get
-    let prefix = catMaybes $ reverse $ map fst scopes
-    name <- nextName nb
-    return $ RT.intercalate "." $ prefix ++ [name]
+getNextNamePrefixed :: Layer Text
+getNextNamePrefixed = do
+    name <- getNextName
+    getNamePrefixed (Just name)
 
-makeName' :: Text -> Layer Text
-makeName' name = do
+getNamePrefixed :: Maybe Text -> Layer Text
+getNamePrefixed name = do
     scopes <- ST.get
-    let prefix = catMaybes $ reverse $ map fst scopes
-    return $ RT.intercalate "." $ prefix ++ [name]
+    let comps = catMaybes $ reverse (map fst scopes) ++ [name]
+    return $ RT.intercalate "." comps
+
+subscope :: (Maybe Text, SomeNameBuilder) -> Layer a -> Layer a
+subscope scope mk = do
+    old_scopes <- ST.get
+    ST.put (scope : old_scopes)
+    a <- mk
+    ST.put old_scopes
+    return a
+
+subscope_named :: Text -> Layer a -> Layer a
+subscope_named name = subscope (Just name, SomeNameBuilder UUIDNameBuilder)
+
+subscope_next_name :: Layer a -> Layer a
+subscope_next_name mk = do
+    name <- getNextName
+    subscope_named name mk
 
 variable :: Text -> Layer SymbolHandle
-variable name = makeName' name >>= liftIO . mxSymbolCreateVariable
+variable name = getNamePrefixed (Just name) >>= liftIO . mxSymbolCreateVariable
 
 prim :: (Text -> args -> IO SymbolHandle) -> args -> Layer SymbolHandle
-prim op args = makeName >>= liftIO . flip op args
+prim op args = getNextNamePrefixed >>= liftIO . flip op args
 
 convolution :: (HasArgs "_Convolution(symbol)" args '["kernel", "num_filter", "data", "stride", "dilate", "pad", "num_group", "workspace", "layout", "cudnn_tune", "cudnn_off", "no_bias"]
                ,WithoutArgs "_Convolution(symbol)" args '["bias", "weight"])
             => ArgsHMap "_Convolution(symbol)" args -> Layer SymbolHandle
-convolution args = do
-    name <- makeName
+convolution args = subscope_next_name $ do
     b <- variable "bias"
     w <- variable "weight"
+
+    name <- getNamePrefixed Nothing
     if args !? #no_bias == Just True
       then
         liftIO $ S._Convolution name (#weight := w .& args)
@@ -162,10 +177,11 @@ convolution args = do
 fullyConnected :: (HasArgs "_FullyConnected(symbol)" args '["flatten", "no_bias", "data", "num_hidden"]
                   ,WithoutArgs "_FullyConnected(symbol)" args '["bias", "weight"])
               => ArgsHMap "_FullyConnected(symbol)" args -> Layer SymbolHandle
-fullyConnected args = do
-    name <- makeName
+fullyConnected args = subscope_next_name $ do
     b <- variable "bias"
     w <- variable "weight"
+
+    name <- getNamePrefixed Nothing
     if args !? #no_bias == Just True
     then
         liftIO $ S._FullyConnected name (#weight := w .& args)
@@ -183,19 +199,28 @@ activation :: HasArgs "_Activation(symbol)" args '["data", "act_type"]
         => ArgsHMap "_Activation(symbol)" args -> Layer SymbolHandle
 activation = prim S._Activation
 
-softmaxoutput :: HasArgs "_SoftmaxOutput(symbol)" args '["data", "label", "out_grad", "smooth_alpha", "normalization", "preserve_shape", "multi_output", "use_ignore", "ignore_label", "grad_scale"]
+softmax :: Fullfilled "softmax(symbol)" args
+        => ArgsHMap "softmax(symbol)" args -> Layer SymbolHandle
+softmax = prim S.softmax
+
+softmaxoutput :: Fullfilled "_SoftmaxOutput(symbol)" args
         => ArgsHMap "_SoftmaxOutput(symbol)" args -> Layer SymbolHandle
 softmaxoutput = prim S._SoftmaxOutput
 
 batchnorm :: HasArgs "_BatchNorm(symbol)" args '["data", "eps", "momentum", "fix_gamma", "use_global_stats", "output_mean_var", "axis", "cudnn_off", "min_calib_range", "max_calib_range"]
           => ArgsHMap "_BatchNorm(symbol)" args -> Layer SymbolHandle
-batchnorm args = do
-    name     <- makeName
+batchnorm args = subscope_next_name $ do
     gamma    <- variable "gamma"
     beta     <- variable "beta"
     mov_mean <- variable "running_mean"
     mov_var  <- variable "running_var"
-    liftIO $ S._BatchNorm name (#gamma := gamma .& #beta := beta .& #moving_mean := mov_mean .& #moving_var := mov_var .& args)
+
+    name <- getNamePrefixed Nothing
+    liftIO $ S._BatchNorm name (#gamma := gamma
+                             .& #beta := beta
+                             .& #moving_mean := mov_mean
+                             .& #moving_var := mov_var
+                             .& args)
 
 cast :: HasArgs "_Cast(symbol)" args '["data", "dtype"]
     => ArgsHMap "_Cast(symbol)" args -> Layer SymbolHandle
@@ -223,4 +248,16 @@ reshape :: (HasArgs "_Reshape(symbol)" args '["data", "shape", "reverse"]
            ,WithoutArgs "_Reshape(symbol)" args '["target_shape", "keep_highest"])
     => ArgsHMap "_Reshape(symbol)" args -> Layer SymbolHandle
 reshape = prim S._Reshape
+
+add_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
+add_ a b = prim S.elemwise_add (#lhs := a .& #rhs := b .& Nil)
+
+sub_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
+sub_ a b = prim S.elemwise_sub (#lhs := a .& #rhs := b .& Nil)
+
+mul_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
+mul_ a b = prim S.elemwise_mul (#lhs := a .& #rhs := b .& Nil)
+
+div_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
+div_ a b = prim S.elemwise_div (#lhs := a .& #rhs := b .& Nil)
 
