@@ -10,7 +10,9 @@ module MXNet.NN.Layer (
   prim,
   variable,
   convolution,
+  convolutionShared,
   fullyConnected,
+  fullyConnectedShared,
   pooling,
   activation,
   softmaxoutput,
@@ -22,7 +24,26 @@ module MXNet.NN.Layer (
   identity,
   dropout,
   reshape,
+  stack,
+  concat_,
+  splitBySections,
+  where_,
+  takeI,
+  blockGrad,
   add_, sub_, mul_, div_,
+  eq_, neq_, gt_, geq_, lt_, leq_,
+  addScalar, subScalar, mulScalar, divScalar,
+  eqScalar, neqScalar, gtScalar, geqScalar, ltScalar, leqScalar,
+  addBroadcast, subBroadcast, mulBroadcast, divBroadcast,
+  eqBroadcast, neqBroadcast, gtBroadcast, geqBroadcast, ltBroadcast, leqBroadcast,
+  ceil_,
+  floor_,
+  sqrt_,
+  log2_,
+  square_,
+  zerosLike, onesLike,
+  squeeze, expandDims,
+  broadcastAxis,
 ) where
 
 import qualified Data.UUID                   as UUID
@@ -174,6 +195,24 @@ convolution args = subscope_next_name $ do
       else
         liftIO $ S._Convolution name (#bias := b .& #weight := w .& args)
 
+convolutionShared :: (HasArgs "_Convolution(symbol)" args
+                        '["kernel", "num_filter", "stride",
+                          "dilate", "pad", "num_group", "workspace",
+                          "layout", "cudnn_tune", "cudnn_off", "no_bias"]
+                     ,WithoutArgs "_Convolution(symbol)" args '["data", "bias", "weight"])
+                  => ArgsHMap "_Convolution(symbol)" args -> Layer (SymbolHandle -> Layer SymbolHandle)
+convolutionShared args = subscope_next_name $ do
+    b <- variable "bias"
+    w <- variable "weight"
+
+    return $ \data_ -> do
+        name <- getNextNamePrefixed
+        if args !? #no_bias == Just True
+          then
+            liftIO $ S._Convolution name (#data := data_ .& #weight := w .& args)
+          else
+            liftIO $ S._Convolution name (#data := data_ .& #bias := b .& #weight := w .& args)
+
 fullyConnected :: (HasArgs "_FullyConnected(symbol)" args '["flatten", "no_bias", "data", "num_hidden"]
                   ,WithoutArgs "_FullyConnected(symbol)" args '["bias", "weight"])
               => ArgsHMap "_FullyConnected(symbol)" args -> Layer SymbolHandle
@@ -187,6 +226,22 @@ fullyConnected args = subscope_next_name $ do
         liftIO $ S._FullyConnected name (#weight := w .& args)
     else
         liftIO $ S._FullyConnected name (#bias := b .& #weight := w .& args)
+
+fullyConnectedShared :: (HasArgs "_FullyConnected(symbol)" args
+                            '["flatten", "no_bias", "num_hidden"]
+                        ,WithoutArgs "_FullyConnected(symbol)" args '["bias", "weight"])
+                     => ArgsHMap "_FullyConnected(symbol)" args -> Layer (SymbolHandle -> Layer SymbolHandle)
+fullyConnectedShared args = subscope_next_name $ do
+    b <- variable "bias"
+    w <- variable "weight"
+
+    return $ \data_ -> do
+        name <- getNextNamePrefixed
+        if args !? #no_bias == Just True
+        then
+            liftIO $ S._FullyConnected name (#data := data_ .& #weight := w .& args)
+        else
+            liftIO $ S._FullyConnected name (#data := data_ .& #bias := b .& #weight := w .& args)
 
 -- 1.0.0 pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off"]
 -- 1.4.0 pooling :: HasArgs "_Pooling(symbol)" args '["data", "kernel", "pool_type", "stride", "pad", "pooling_convention", "global_pool", "cudnn_off", "p_value", "count_include_pad"]
@@ -226,6 +281,14 @@ cast :: HasArgs "_Cast(symbol)" args '["data", "dtype"]
     => ArgsHMap "_Cast(symbol)" args -> Layer SymbolHandle
 cast = prim S._Cast
 
+stack :: (HasArgs "stack(symbol)" args '["data", "axis"]
+         ,WithoutArgs "stack(symbol)" args '["num_args"])
+      => ArgsHMap "stack(symbol)" args -> Layer SymbolHandle
+stack args = prim S.stack (#num_args := len .& args)
+    where
+        data_ = args !? #data
+        len = fromMaybe 0 (length <$> data_)
+
 plus :: HasArgs "elemwise_add(symbol)" args '["lhs", "rhs"]
     => ArgsHMap "elemwise_add(symbol)" args -> Layer SymbolHandle
 plus = prim S.elemwise_add
@@ -244,20 +307,80 @@ dropout :: HasArgs "_Dropout(symbol)" args '["data", "mode", "p", "axes", "cudnn
     => ArgsHMap "_Dropout(symbol)" args -> Layer SymbolHandle
 dropout = prim S._Dropout
 
-reshape :: (HasArgs "_Reshape(symbol)" args '["data", "shape", "reverse"]
-           ,WithoutArgs "_Reshape(symbol)" args '["target_shape", "keep_highest"])
-    => ArgsHMap "_Reshape(symbol)" args -> Layer SymbolHandle
-reshape = prim S._Reshape
+reshape :: [Int] -> SymbolHandle -> Layer SymbolHandle
+reshape shape a = prim S._Reshape (#data := a .& #shape := shape .& Nil)
 
 add_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
-add_ a b = prim S.elemwise_add (#lhs := a .& #rhs := b .& Nil)
-
 sub_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
-sub_ a b = prim S.elemwise_sub (#lhs := a .& #rhs := b .& Nil)
-
 mul_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
-mul_ a b = prim S.elemwise_mul (#lhs := a .& #rhs := b .& Nil)
-
 div_ :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
+
+add_ a b = prim S.elemwise_add (#lhs := a .& #rhs := b .& Nil)
+sub_ a b = prim S.elemwise_sub (#lhs := a .& #rhs := b .& Nil)
+mul_ a b = prim S.elemwise_mul (#lhs := a .& #rhs := b .& Nil)
 div_ a b = prim S.elemwise_div (#lhs := a .& #rhs := b .& Nil)
 
+eq_  a b = prim S._equal (#lhs := a .& #rhs := b .& Nil)
+neq_ a b = prim S._not_equal (#lhs := a .& #rhs := b .& Nil)
+lt_   a b = prim S._lesser (#lhs := a .& #rhs := b .& Nil)
+leq_ a b = prim S._lesser_equal (#lhs := a .& #rhs := b .& Nil)
+gt_   a b = prim S._greater (#lhs := a .& #rhs := b .& Nil)
+geq_ a b = prim S._greater_equal (#lhs := a .& #rhs := b .& Nil)
+
+addScalar b a = prim S._plus_scalar (#data := a .& #scalar := b .& Nil)
+subScalar b a = prim S._minus_scalar (#data := a .& #scalar := b .& Nil)
+mulScalar b a = prim S._mul_scalar (#data := a .& #scalar := b .& Nil)
+divScalar b a = prim S._div_scalar (#data := a .& #scalar := b .& Nil)
+
+eqScalar  b a = prim S._equal_scalar (#data := a .& #scalar := b .& Nil)
+neqScalar b a = prim S._not_equal_scalar (#data := a .& #scalar := b .& Nil)
+ltScalar  b a = prim S._lesser_scalar (#data := a .& #scalar := b .& Nil)
+leqScalar b a = prim S._lesser_equal_scalar (#data := a .& #scalar := b .& Nil)
+gtScalar  b a = prim S._greater_scalar (#data := a .& #scalar := b .& Nil)
+geqScalar b a = prim S._greater_equal_scalar (#data := a .& #scalar := b .& Nil)
+
+addBroadcast a b = prim S.broadcast_add (#lhs := a .& #rhs := b .& Nil)
+subBroadcast a b = prim S.broadcast_sub (#lhs := a .& #rhs := b .& Nil)
+mulBroadcast a b = prim S.broadcast_mul (#lhs := a .& #rhs := b .& Nil)
+divBroadcast a b = prim S.broadcast_div (#lhs := a .& #rhs := b .& Nil)
+
+eqBroadcast a b = prim S.broadcast_equal (#lhs := a .& #rhs := b .& Nil)
+neqBroadcast a b = prim S.broadcast_not_equal (#lhs := a .& #rhs := b .& Nil)
+ltBroadcast a b = prim S.broadcast_lesser (#lhs := a .& #rhs := b .& Nil)
+leqBroadcast a b = prim S.broadcast_lesser_equal (#lhs := a .& #rhs := b .& Nil)
+gtBroadcast a b = prim S.broadcast_greater (#lhs := a .& #rhs := b .& Nil)
+geqBroadcast a b = prim S.broadcast_greater_equal (#lhs := a .& #rhs := b .& Nil)
+
+ceil_   a = prim S.ceil   (#data := a .& Nil)
+floor_  a = prim S.floor  (#data := a .& Nil)
+sqrt_   a = prim S.sqrt   (#data := a .& Nil)
+log2_   a = prim S.log2   (#data := a .& Nil)
+square_ a = prim S.square (#data := a .& Nil)
+
+blockGrad :: SymbolHandle -> Layer SymbolHandle
+blockGrad s = prim S._BlockGrad (#data := s .& Nil)
+
+concat_ :: Int -> [SymbolHandle] -> Layer SymbolHandle
+concat_ d s = prim S._Concat (#data := s .& #num_args := length s .& #dim := d .& Nil)
+
+splitBySections :: Int -> Int -> Bool -> SymbolHandle -> Layer [SymbolHandle]
+splitBySections num_sections axis squeeze s = do
+    r <- prim S._split_v2 (#data := s
+                        .& #axis := axis
+                        .& #indices := []
+                        .& #sections := num_sections
+                        .& #squeeze_axis := squeeze .& Nil)
+    mapM (at r) ([0..num_sections] :: [Int])
+
+takeI :: SymbolHandle -> SymbolHandle -> Layer SymbolHandle
+takeI i a = prim S.take (#a := a .& #indices := i .& Nil)
+
+where_ c a b = prim S._where (#condition := c .& #x := a .& #y := b .& Nil)
+
+zerosLike a = prim S.zeros_like (#data := a .& Nil)
+onesLike  a = prim S.ones_like  (#data := a .& Nil)
+
+squeeze axis a = prim S.squeeze (#data := a .& #axis := axis .& Nil)
+expandDims axis a = prim S.expand_dims (#data := a .& #axis := axis .& Nil)
+
+broadcastAxis axis size a = prim S.broadcast_axis (#data := a .& #axis := axis .& #size := size .& Nil)
