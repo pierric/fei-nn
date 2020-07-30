@@ -1,36 +1,36 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeOperators     #-}
 module MXNet.NN.EvalMetric where
 
-import RIO
-import qualified RIO.NonEmpty as RNE
-import qualified RIO.Vector.Storable as SV
-import qualified RIO.Vector.Storable.Partial as SV (head)
-import qualified RIO.HashMap as M
-import qualified RIO.HashMap.Partial as M ((!))
-import qualified RIO.Text as T
-import Formatting (sformat, (%), fixed)
+import           Formatting                   (fixed, sformat, (%))
+import           RIO
+import qualified RIO.HashMap                  as M
+import qualified RIO.HashMap.Partial          as M ((!))
+import qualified RIO.NonEmpty                 as RNE
+import qualified RIO.Text                     as T
+import qualified RIO.Vector.Storable          as SV
+import qualified RIO.Vector.Storable.Partial  as SV (head)
 
-import MXNet.Base
+import           MXNet.Base
 import qualified MXNet.Base.Operators.NDArray as A
-import MXNet.NN.Types
+import           MXNet.NN.Types
 
 -- | Abstract Evaluation type class
 class EvalMetricMethod metric where
     data MetricData metric a
-    newMetric :: (MonadIO m, DType a)
+    newMetric :: (MonadIO m, DType a, HasCallStack)
              => Text                          -- phase name
              -> metric a                      -- tag
              -> m (MetricData metric a)
-    evalMetric :: (MonadIO m, DType a)
+    evalMetric :: (MonadIO m, DType a, HasCallStack)
              => MetricData metric a           -- evaluation metric
              -> M.HashMap Text (NDArray a)    -- network bindings
              -> [NDArray a]                   -- output of the network
              -> m (M.HashMap Text Double)
-    formatMetric :: (MonadIO m, DType a) => MetricData metric a -> m Text
+    formatMetric :: (MonadIO m, DType a, HasCallStack) => MetricData metric a -> m Text
 
 
 -- | Basic evaluation - accuracy

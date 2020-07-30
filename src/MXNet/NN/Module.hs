@@ -25,10 +25,10 @@ data UnkownShapeOrScalar = UnkownShapeOrScalar Text
 instance Exception UnkownShapeOrScalar
 
 
-initialize :: forall tag dty. DType dty => SymbolHandle -> Config dty -> IO (TaggedModuleState dty tag)
+initialize :: forall tag dty. (HasCallStack, DType dty) => SymbolHandle -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
      -- give a initial batch_size = 1 for the placeholders
-    let spec1 = M.map (shapeCons 1) $ M.difference input_shapes initializers
+    let spec1 = M.difference input_shapes initializers
         spec2 = initializers
         dinit = config ^. cfg_default_initializer
         cxt   = config ^. cfg_context
@@ -51,6 +51,14 @@ initialize symbol config = do
     aux_tensors <- M.traverseWithKey (initA dinit) aux_with_shp
 
     let params = arg_tensors `M.union` aux_tensors
+    --forM (M.toList params) $ \(k, p) -> do
+    --    o <- case p of
+    --      ParameterV a -> fmap (\s -> ("V", [s])) $ ndshape a
+    --      ParameterF a -> fmap (\s -> ("F", [s])) $ ndshape a
+    --      ParameterG a b -> liftM2 (\s t -> ("V", [s, t])) (ndshape a) (ndshape b)
+    --      ParameterA a -> fmap (\s -> ("A", [s])) $ ndshape a
+    --    traceShowM ("  param", k, o)
+
     executor <- bind symbol cxt params True
 
     return $ Tagged $ ModuleState {
@@ -70,7 +78,7 @@ initialize symbol config = do
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
     -- other input symbols are initialized by an initializer.
-    initI placeholder fixed spec2 dinit inp shp =
+    initI placeholder fixed spec2 dinit inp shp = do
         case M.lookup inp placeholder of
             Just in_arg -> do
                 return $ ParameterV in_arg
@@ -92,7 +100,7 @@ initialize symbol config = do
     checkTensorShape (name, STensor s) = return (name, s)
 
 
-bind :: DType dty => SymbolHandle -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
+bind :: (HasCallStack, DType dty) => SymbolHandle -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
     auxnames <- listAuxiliaryStates symbol
