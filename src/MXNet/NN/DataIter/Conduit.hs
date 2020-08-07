@@ -1,6 +1,6 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies          #-}
 module MXNet.NN.DataIter.Conduit (
     ConduitData(..),
     Dataset(..),
@@ -8,51 +8,51 @@ module MXNet.NN.DataIter.Conduit (
     imageRecordIter, mnistIter, csvIter, libSVMIter
 ) where
 
-import RIO
-import RIO.Prelude (lift)
-import Data.Conduit
+import           Data.Conduit
 import qualified Data.Conduit.Combinators as C
-import qualified Data.Conduit.List as CL
+import qualified Data.Conduit.List        as CL
+import           RIO
+import           RIO.Prelude              (lift)
 
-import MXNet.Base
-import qualified MXNet.Base.DataIter as I
-import MXNet.NN.DataIter.Class
+import           MXNet.Base
+import qualified MXNet.Base.DataIter      as I
+import           MXNet.NN.DataIter.Class
 
-data ConduitData m a = ConduitData {
-    iter_batch_size :: Maybe Int,
-    getConduit :: ConduitM () a m ()
-}
+data ConduitData m a = ConduitData
+    { iter_batch_size :: Maybe Int
+    , getConduit      :: ConduitM () a m ()
+    }
 
-imageRecordIter_v1 :: (Fullfilled "_ImageRecordIter_v1" args, DType a, MonadIO m)
-    => ArgsHMap "_ImageRecordIter_v1" args -> ConduitData m (NDArray a, NDArray a)
+imageRecordIter_v1 :: (Fullfilled "_ImageRecordIter_v1" () args, DType a, MonadIO m)
+    => ArgsHMap "_ImageRecordIter_v1" () args -> ConduitData m (NDArray a, NDArray a)
 imageRecordIter_v1 args = ConduitData {
     getConduit = makeIter I._ImageRecordIter_v1 args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-imageRecordIter :: (Fullfilled "_ImageRecordIter" args, DType a, MonadIO m)
-    => ArgsHMap "_ImageRecordIter" args -> ConduitData m (NDArray a, NDArray a)
+imageRecordIter :: (Fullfilled "_ImageRecordIter" () args, DType a, MonadIO m)
+    => ArgsHMap "_ImageRecordIter" () args -> ConduitData m (NDArray a, NDArray a)
 imageRecordIter args = ConduitData {
     getConduit = makeIter I._ImageRecordIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-mnistIter :: (Fullfilled "_MNISTIter" args, DType a, MonadIO m)
-    => ArgsHMap "_MNISTIter" args -> ConduitData m (NDArray a, NDArray a)
+mnistIter :: (Fullfilled "_MNISTIter" () args, DType a, MonadIO m)
+    => ArgsHMap "_MNISTIter" () args -> ConduitData m (NDArray a, NDArray a)
 mnistIter args = ConduitData {
     getConduit = makeIter I._MNISTIter args,
     iter_batch_size = (args !? #batch_size) <|> Just 1
 }
 
-csvIter :: (Fullfilled "_CSVIter" args, DType a, MonadIO m)
-    => ArgsHMap "_CSVIter" args -> ConduitData m (NDArray a, NDArray a)
+csvIter :: (Fullfilled "_CSVIter" () args, DType a, MonadIO m)
+    => ArgsHMap "_CSVIter" () args -> ConduitData m (NDArray a, NDArray a)
 csvIter args = ConduitData {
     getConduit = makeIter I._CSVIter args,
     iter_batch_size = Just (args ! #batch_size)
 }
 
-libSVMIter :: (Fullfilled "_LibSVMIter" args, DType a, MonadIO m)
-    => ArgsHMap "_LibSVMIter" args -> ConduitData m (NDArray a, NDArray a)
+libSVMIter :: (Fullfilled "_LibSVMIter" () args, DType a, MonadIO m)
+    => ArgsHMap "_LibSVMIter" () args -> ConduitData m (NDArray a, NDArray a)
 libSVMIter args = ConduitData {
     getConduit = makeIter I._LibSVMIter args,
     iter_batch_size = Just (args ! #batch_size)

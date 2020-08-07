@@ -5,17 +5,17 @@
 {-# LANGUAGE TypeOperators     #-}
 module MXNet.NN.EvalMetric where
 
-import           Formatting                   (fixed, sformat, (%))
+import           Formatting                  (fixed, sformat, (%))
 import           RIO
-import qualified RIO.HashMap                  as M
-import qualified RIO.HashMap.Partial          as M ((!))
-import qualified RIO.NonEmpty                 as RNE
-import qualified RIO.Text                     as T
-import qualified RIO.Vector.Storable          as SV
-import qualified RIO.Vector.Storable.Partial  as SV (head)
+import qualified RIO.HashMap                 as M
+import qualified RIO.HashMap.Partial         as M ((!))
+import qualified RIO.NonEmpty                as RNE
+import qualified RIO.Text                    as T
+import qualified RIO.Vector.Storable         as SV
+import qualified RIO.Vector.Storable.Partial as SV (head)
 
 import           MXNet.Base
-import qualified MXNet.Base.Operators.NDArray as A
+import           MXNet.NN.Layer
 import           MXNet.NN.Types
 
 -- | Abstract Evaluation type class
@@ -50,7 +50,7 @@ instance EvalMetricMethod Accuracy where
         return $ M.singleton (phase `T.append` "_acc") acc
       where
         compute preds@(NDArray preds_hdl) lbl = do
-            [pred_cat_hdl] <- A.argmax (#data := preds_hdl .& #axis := Just 1 .& Nil)
+            pred_cat_hdl <- argmax preds_hdl (Just 1) False
             pred_cat <- toVector (NDArray pred_cat_hdl)
             real_cat <- toVector lbl
 
@@ -67,9 +67,6 @@ instance EvalMetricMethod Accuracy where
 
 -- | Basic evaluation - cross entropy
 data CrossEntropy a = CrossEntropy Text
-
-copyTo :: DType a => NDArray a -> NDArray a -> IO ()
-copyTo (NDArray dst) (NDArray src) = A._copyto_upd [dst] (#data := src .& Nil)
 
 instance EvalMetricMethod CrossEntropy where
     data MetricData CrossEntropy a = CrossEntropyData Text Text (IORef Int) (IORef Float)
@@ -102,11 +99,11 @@ instance EvalMetricMethod CrossEntropy where
                     else do
                         preds_shap <- ndshape preds
                         preds_copy <- makeEmptyNDArray preds_shap c2
-                        copyTo preds_copy preds
+                        copy preds preds_copy
                         return preds_copy
-            predprj <- sing A.pick (#data := preds_may_copy .& #index := labelHandle .& Nil)
-            predlog <- sing A.log (#data := predprj .& Nil)
-            loss    <- sing A.sum (#data := predlog .& Nil) >>= toVector . NDArray
+            predprj <- pick (#data := preds_may_copy .& #index := labelHandle .& Nil)
+            predlog <- log2_ predprj
+            loss    <- sum_ predlog Nothing False >>= toVector . NDArray
             modifyIORef sumRef (+ (negate $ SV.head loss))
             modifyIORef cntRef (+ RNE.head shp1)
     formatMetric (CrossEntropyData _ _ cntRef sumRef) = liftIO $ do
