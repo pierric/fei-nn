@@ -53,13 +53,15 @@ data XavierRandom = XavierUniform
 xavier :: (DType a, HasEnum (DTypeName a) '["None", "float16" ,"float32", "float64"])
     => Float -> XavierRandom -> XavierFactor -> Initializer a
 xavier magnitude distr factor name shp cxt
-    | [ofan,ifan] <- RNE.toList shp =
-        let scale = case factor of
+    | RNE.length shp < 2 = throwM $ InvalidArgument $
+        T.concat ["invalid shape ", formatShape shp, " for xavier initializer"]
+    | otherwise =
+        let ofan :| dims = shp
+            ifan = product dims
+            scale = case factor of
                       XavierIn  -> sqrt (magnitude / fromIntegral ifan)
                       XavierOut -> sqrt (magnitude / fromIntegral ofan)
                       XavierAvg -> sqrt (magnitude * 2.0 / fromIntegral (ifan + ofan))
         in case distr of
              XavierUniform  -> uniform scale name shp cxt
              XavierGaussian-> normal  scale name shp cxt
-    | otherwise = throwM $ InvalidArgument $
-        T.concat ["invalid shape ", formatShape shp, " for xavier initializer"]
