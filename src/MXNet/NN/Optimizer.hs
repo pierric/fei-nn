@@ -134,7 +134,7 @@ instance Optimizer ADAM_Opt where
             (moving_avg, moving_var) <- case M.lookup symbol ema of
                 Nothing    -> do
                     avg <- prim T._zeros_like (#data := weight .& Nil)
-                    var <- prim T._zeros_like (#data := weight .& Nil)
+                    var <- prim T._ones_like  (#data := weight .& Nil)
                     writeIORef emaref (M.insert symbol (avg, var) ema)
                     return (avg, var)
                 Just (a, v) -> return (a, v)
