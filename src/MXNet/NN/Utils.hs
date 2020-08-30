@@ -1,27 +1,24 @@
 {-# LANGUAGE RecordWildCards #-}
 module MXNet.NN.Utils where
 
-import           Control.Lens                 (use)
-import           Data.Maybe                   (mapMaybe)
+import           Control.Lens         (use)
+import           Data.Maybe           (mapMaybe)
 import           Formatting
 import           RIO
-import           RIO.Directory                (getModificationTime,
-                                               listDirectory)
-import           RIO.FilePath                 (dropExtension, (</>))
-import qualified RIO.HashMap                  as M
-import           RIO.List                     (lastMaybe, sortOn)
-import qualified RIO.NonEmpty                 as RNE
-import qualified RIO.Text                     as T
+import           RIO.Directory        (getModificationTime, listDirectory)
+import           RIO.FilePath         (dropExtension, (</>))
+import qualified RIO.HashMap          as M
+import           RIO.List             (lastMaybe, sortOn)
+import qualified RIO.NonEmpty         as RNE
+import qualified RIO.Text             as T
 
-import           MXNet.Base                   (ArgOf (..), Context (..),
-                                               HMap (..), NDArray (..),
-                                               Symbol (..), (.&))
-import qualified MXNet.Base.Operators.NDArray as A
-import           MXNet.Base.Raw               (mxNDArrayLoad, mxNDArraySave,
-                                               mxSymbolSaveToFile)
-import           MXNet.NN.TaggedState         (untag)
-import           MXNet.NN.Types               (Module, Parameter (..),
-                                               mod_params, mod_symbol)
+import           MXNet.Base           (Context (..), NDArray (..))
+import           MXNet.Base.Raw       (mxNDArrayLoad, mxNDArraySave,
+                                       mxSymbolSaveToFile)
+import           MXNet.NN.Layer       (copy)
+import           MXNet.NN.TaggedState (untag)
+import           MXNet.NN.Types       (Module, Parameter (..), mod_params,
+                                       mod_symbol)
 
 -- | format a shape
 formatShape :: NonEmpty Int -> Text
@@ -85,11 +82,11 @@ loadState weights_filename ignores = do
             (_, Nothing) ->
                 lift $ logInfo $ display $ sformat ("Tensor " % stext % " is missing.") name
             (_, Just (ParameterG target _)) ->
-                liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                liftIO $ void $ copy hdl (unNDArray target)
             (_, Just (ParameterF target)) ->
-                liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                liftIO $ void $ copy hdl (unNDArray target)
             (_, Just (ParameterA target)) ->
-                liftIO $ A._copyto_upd [unNDArray target] (#data := hdl .& Nil)
+                liftIO $ void $ copy hdl (unNDArray target)
             (_, Just (ParameterV _)) ->
                 logWarn . display $ sformat
                     ("a variable (" % stext % ") found in the state file.") name

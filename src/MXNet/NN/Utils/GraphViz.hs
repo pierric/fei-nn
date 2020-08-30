@@ -138,7 +138,7 @@ dotGraph sym = do
 
     _like sfx node = T.isSuffixOf sfx (_node_name node)
 
-type instance ParameterList "graphviz_node" =
+type instance ParameterList "graphviz_node" t =
     '[ '("label",     'AttrOpt Text),
        '("shape",     'AttrOpt GV.Shape),
        '("fixedsize", 'AttrOpt Bool),
@@ -147,8 +147,8 @@ type instance ParameterList "graphviz_node" =
        '("height",    'AttrOpt Double),
        '("style",     'AttrOpt GV.Style) ]
 
-mkNode :: (Fullfilled "graphviz_node" args)
-      => Int -> ArgsHMap "graphviz_node" args -> GVM.DotM Int ()
+mkNode :: (Fullfilled "graphviz_node" () args)
+      => Int -> ArgsHMap "graphviz_node" () args -> GVM.DotM Int ()
 mkNode nodeid args = GVM.node nodeid attrs
   where
     shp = GV.Shape  $ fromMaybe GV.BoxShape $ args !? #shape

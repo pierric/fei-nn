@@ -1,22 +1,21 @@
 module MXNet.NN.Module where
 
-import           Control.Lens                 (ix, use, (^?!))
-import           Control.Lens.Setter          ((%=), (+=), (.=))
-import           Formatting                   (int, sformat, stext, (%))
-import           GHC.TypeLits                 (KnownSymbol)
+import           Control.Lens            (ix, use, (^?!))
+import           Control.Lens.Setter     ((%=), (+=), (.=))
+import           Formatting              (int, sformat, stext, (%))
+import           GHC.TypeLits            (KnownSymbol)
 import           RIO
-import qualified RIO.HashMap                  as M
-import qualified RIO.HashSet                  as S
-import           RIO.List                     (zipWith3)
+import qualified RIO.HashMap             as M
+import qualified RIO.HashSet             as S
+import           RIO.List                (zipWith3)
 
 import           MXNet.Base
-import qualified MXNet.Base.Operators.NDArray as A
-import           MXNet.NN.DataIter.Class      (Dataset (..), DatasetProp (..))
-import           MXNet.NN.EvalMetric          (EvalMetricMethod (..),
-                                               MetricData)
-import           MXNet.NN.Optimizer           (Optimizer, optimize)
-import           MXNet.NN.Session             (withSession)
-import           MXNet.NN.TaggedState         (Tagged (..), untag)
+import           MXNet.NN.DataIter.Class (Dataset (..), DatasetProp (..))
+import           MXNet.NN.EvalMetric     (EvalMetricMethod (..), MetricData)
+import           MXNet.NN.Layer          (copy)
+import           MXNet.NN.Optimizer      (Optimizer, optimize)
+import           MXNet.NN.Session        (withSession)
+import           MXNet.NN.TaggedState    (Tagged (..), untag)
 import           MXNet.NN.Types
 
 
@@ -132,7 +131,7 @@ adapt inputs = do
 
     -- reshape the executor (and arg, aux arrays)
     when (shapes /= shapes') $ do
-        (args, grads, auxs, exec) <- liftIO $ execReshapeEx exec True True context (M.toList shapes')
+        (args, grads, auxs, exec) <- liftIO $ execReshapeEx exec False True context (M.toList shapes')
         arg_names <- liftIO $ listArguments symbol
         aux_names <- liftIO $ listAuxiliaryStates symbol
         let buildArg key a Nothing  | S.member key fixed = (key, ParameterF a)
@@ -141,6 +140,11 @@ adapt inputs = do
             buildAux key a = (key, ParameterA a)
             arg_ndarrs = M.fromList $ zipWith3 buildArg arg_names args grads
             aux_ndarrs = M.fromList $ zipWith buildAux aux_names auxs
+
+        -- it should be safe to free the old executor
+        old_executor <- use (untag . mod_executor)
+        liftIO $ execFree old_executor
+
         untag . mod_executor .= exec
         untag . mod_input_shapes .= shapes'
         untag . mod_params   .= M.union arg_ndarrs aux_ndarrs
@@ -149,8 +153,8 @@ adapt inputs = do
     targets <- use $ untag . mod_params
     forM_ (M.toList inputs) $ \ (k, src) -> liftIO $ do
         case M.lookup k targets of
-          Just (ParameterV dst) -> A._copyto_upd [unNDArray dst] (#data := unNDArray src .& Nil)
-          _ -> return ()
+          Just (ParameterV dst) -> void $ copy src dst
+          _                     -> return ()
 
 forwardOnly :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
 forwardOnly inputs = do

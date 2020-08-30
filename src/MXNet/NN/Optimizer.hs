@@ -1,7 +1,7 @@
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE ConstraintKinds      #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module MXNet.NN.Optimizer (
@@ -9,18 +9,19 @@ module MXNet.NN.Optimizer (
     OptimizerTag(..)
 ) where
 
-import RIO
-import RIO.State
-import qualified RIO.HashMap as M
-import GHC.TypeLits
-import GHC.Exts (Constraint)
-import Control.Lens (use, (.=))
+import           Control.Lens                (use, (.=))
+import           GHC.Exts                    (Constraint)
+import           GHC.TypeLits
+import           RIO
+import qualified RIO.HashMap                 as M
+import           RIO.State
 
-import MXNet.Base hiding (Symbol)
-import qualified MXNet.Base.Operators.NDArray as A
-import MXNet.NN.LrScheduler (LrScheduler(..))
-import MXNet.NN.TaggedState (untag)
-import MXNet.NN.Types (TaggedModuleState, mod_statistics, stat_num_upd, stat_last_lr)
+import           MXNet.Base                  hiding (Symbol)
+import qualified MXNet.Base.Operators.Tensor as T
+import           MXNet.NN.LrScheduler        (LrScheduler (..))
+import           MXNet.NN.TaggedState        (untag)
+import           MXNet.NN.Types              (TaggedModuleState, mod_statistics,
+                                              stat_last_lr, stat_num_upd)
 
 -- | Abstract Optimizer type class
 class Optimizer (opt :: * -> *) where
@@ -31,12 +32,14 @@ class Optimizer (opt :: * -> *) where
     -- type OptArgsList opt :: [KV *]
     -- | make the optimizer
     makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args)
-                  => OptimizerTag opt -> sch -> ArgsHMap (OptimizerSym opt) args -> IO (opt dtype)
+                  => OptimizerTag opt -> sch
+                  -> ArgsHMap (OptimizerSym opt) (NDArray dtype) args
+                  -> IO (opt dtype)
     -- | run the optimizer with the input & expected tensor
     optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) m, MonadIO m)
              => opt dtype                            -- optimizer
              -> Text                                 -- symbol name to optimize
-             -> NDArray dytpe                        -- parameter
+             -> NDArray dtype                        -- parameter
              -> NDArray dtype                        -- gradient
              -> m ()
 
@@ -46,32 +49,38 @@ type family OptimizerCst (opt :: * -> *) dt (args :: [*]) :: Constraint
 -- | SGD optimizer
 data SGD_Opt dtype where
     SGD_Opt :: (LrScheduler sch, OptimizerCst SGD_Opt dtype args)
-            => sch -> ArgsHMap (OptimizerSym SGD_Opt) args -> SGD_Opt dtype
+            => sch -> ArgsHMap (OptimizerSym SGD_Opt) (NDArray dtype) args
+            -> SGD_Opt dtype
 
-type instance OptimizerSym SGD_Opt = "sgd_update(ndarray)"
+type instance OptimizerSym SGD_Opt = "_sgd_update"
 -- 1.0.0 type instance OptimizerCst SGD_Opt dt args = HasArgs (OptimizerSym SGD_Opt) args '["wd", "rescale_grad", "clip_gradient"]
-type instance OptimizerCst SGD_Opt dt args = HasArgs (OptimizerSym SGD_Opt) args '["wd", "rescale_grad", "clip_gradient", "lazy_update"]
+type instance OptimizerCst SGD_Opt dt args =
+    HasArgs (OptimizerSym SGD_Opt) (NDArray dt) args '["wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer SGD_Opt where
     data OptimizerTag SGD_Opt = SGD
     makeOptimizer SGD sch args = return $ SGD_Opt sch args
-    optimize (SGD_Opt sch args) _ (NDArray weight) (NDArray gradient) = do
+    optimize (SGD_Opt sch args) _ weight gradient = do
         nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
         untag . mod_statistics . stat_last_lr .= lr
-        liftIO $ A.sgd_update_upd [weight] (
-            #weight := weight   .&
-            #grad   := gradient .&
-            #lr     := lr       .& args)
+        liftIO $ void $ T._sgd_update
+            (#weight := weight   .&
+             #grad   := gradient .&
+             #lr     := lr       .& args)
+            (Just [weight])
 
 -- | SGD with momentum optimizer
 data SGD_Mom_Opt dtype where
     SGD_Mom_Opt :: (LrScheduler sch, OptimizerCst SGD_Mom_Opt dtype args)
-                => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) args -> (IORef (M.HashMap Text (NDArray dtype))) -> SGD_Mom_Opt dtype
+                => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) (NDArray dtype) args
+                -> (IORef (M.HashMap Text (NDArray dtype)))
+                -> SGD_Mom_Opt dtype
 
-type instance OptimizerSym SGD_Mom_Opt = "sgd_mom_update(ndarray)"
+type instance OptimizerSym SGD_Mom_Opt = "_sgd_mom_update"
 -- 1.0.0 type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient"]
-type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
+type instance OptimizerCst SGD_Mom_Opt dt args =
+    HasArgs (OptimizerSym SGD_Mom_Opt) (NDArray dt) args '["momentum", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer SGD_Mom_Opt where
     data OptimizerTag SGD_Mom_Opt = SGD'Mom
@@ -79,7 +88,7 @@ instance Optimizer SGD_Mom_Opt where
         empty <- newIORef M.empty
         return $ SGD_Mom_Opt sch args empty
 
-    optimize (SGD_Mom_Opt sch args emaref) symbol (NDArray weight) (NDArray gradient) = do
+    optimize (SGD_Mom_Opt sch args emaref) symbol weight gradient = do
         nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
         untag . mod_statistics . stat_last_lr .= lr
@@ -87,24 +96,28 @@ instance Optimizer SGD_Mom_Opt where
             ema <- readIORef emaref
             momentum <- case M.lookup symbol ema of
                 Nothing    -> do
-                    [mom] <- A.zeros_like (#data := weight .& Nil)
-                    writeIORef emaref (M.insert symbol (NDArray mom) ema)
+                    mom <- prim T._zeros_like (#data := weight .& Nil)
+                    writeIORef emaref (M.insert symbol mom ema)
                     return mom
-                Just (NDArray a) -> return a
-            A.sgd_mom_update_upd [weight] (
-                #weight := weight   .&
-                #grad   := gradient .&
-                #mom    := momentum .&
-                #lr     := lr       .& args)
+                Just a -> return a
+            void $ T._sgd_mom_update
+                (#weight := weight   .&
+                 #grad   := gradient .&
+                 #mom    := momentum .&
+                 #lr     := lr       .& args)
+                (Just [weight])
 
 -- | ADAM optmizer
 data ADAM_Opt dtype where
     ADAM_Opt :: (LrScheduler sch, OptimizerCst ADAM_Opt dtype args)
-            => sch -> ArgsHMap (OptimizerSym ADAM_Opt) args -> IORef (M.HashMap Text (NDArray dtype, NDArray dtype)) -> ADAM_Opt dtype
+            => sch -> ArgsHMap (OptimizerSym ADAM_Opt) (NDArray dtype) args
+            -> IORef (M.HashMap Text (NDArray dtype, NDArray dtype))
+            -> ADAM_Opt dtype
 
-type instance OptimizerSym ADAM_Opt = "adam_update(ndarray)"
+type instance OptimizerSym ADAM_Opt = "_adam_update"
 -- 1.0.0 type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient"]
-type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
+type instance OptimizerCst ADAM_Opt dt args =
+    HasArgs (OptimizerSym ADAM_Opt) (NDArray dt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer ADAM_Opt where
     data OptimizerTag ADAM_Opt = ADAM
@@ -112,7 +125,7 @@ instance Optimizer ADAM_Opt where
         empty <- newIORef M.empty
         return $ ADAM_Opt sch args empty
 
-    optimize (ADAM_Opt sch args emaref) symbol (NDArray weight) (NDArray gradient) = do
+    optimize (ADAM_Opt sch args emaref) symbol weight gradient = do
         nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
         untag . mod_statistics . stat_last_lr .= lr
@@ -120,14 +133,15 @@ instance Optimizer ADAM_Opt where
             ema <- readIORef emaref
             (moving_avg, moving_var) <- case M.lookup symbol ema of
                 Nothing    -> do
-                    [avg] <- A.zeros_like (#data := weight .& Nil)
-                    [var] <- A.zeros_like (#data := weight .& Nil)
-                    writeIORef emaref (M.insert symbol (NDArray avg, NDArray var) ema)
+                    avg <- prim T._zeros_like (#data := weight .& Nil)
+                    var <- prim T._ones_like  (#data := weight .& Nil)
+                    writeIORef emaref (M.insert symbol (avg, var) ema)
                     return (avg, var)
-                Just (NDArray a, NDArray v) -> return (a, v)
-            A.adam_update_upd [weight] (
-                #weight := weight     .&
-                #grad   := gradient   .&
-                #mean   := moving_avg .&
-                #var    := moving_var .&
-                #lr     := lr         .& args)
+                Just (a, v) -> return (a, v)
+            void $ T._adam_update
+                (#weight := weight     .&
+                 #grad   := gradient   .&
+                 #mean   := moving_avg .&
+                 #var    := moving_var .&
+                 #lr     := lr         .& args)
+                (Just [weight])

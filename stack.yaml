@@ -11,9 +11,9 @@ ghc-options:
     "$everything": -threaded
 packages:
 - .
-extra-deps:
 - ../fei-base/
 - ../tuple-ops
+extra-deps:
 - git: https://github.com/0xCM/type-combinators.git
   commit: 58167dd4017b666ff592bb9493b0570a054aabdb
 - git: https://github.com/pierric/haskell-src-exts.git
@@ -26,4 +26,4 @@ extra-lib-dirs:
 - /home/jiasen/workspace/mxnet/build-1.6.0
 flags:
   fei-base:
-    MXNet_1_6: true
+    mxnet_1_6: true
