@@ -1,5 +1,6 @@
 {-# LANGUAGE PartialTypeSignatures  #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE UndecidableInstances   #-}
 module MXNet.NN.Layer where
 
@@ -19,9 +20,9 @@ import qualified MXNet.NN.Types              as S
 runLayerBuilder :: Layer a -> IO a
 runLayerBuilder = flip ST.evalStateT []
 
-type instance TensorM SymbolHandle  = Layer SymbolHandle
+type instance TensorMonad SymbolHandle  = Layer
 
-instance PrimTensorOp SymbolHandle where
+instance PrimTensorOp SymbolHandle SymbolHandle where
     prim op args = getNextNamePrefixed >>= liftIO . op args
 
 type Layer = ST.StateT [(Maybe Text, SomeNameBuilder)] IO
@@ -82,23 +83,23 @@ dumpCurrentScope = do
     scopes <- ST.get
     return $ tshow scopes
 
-sequential :: Text -> Layer a -> Layer a
+sequential :: HasCallStack => Text -> Layer a -> Layer a
 sequential name mk = do
     nb <- liftIO $ SequNameBuilder <$> newIORef 0
     subscope (Just name, SomeNameBuilder nb) mk
 
-sequential' :: Layer a -> Layer a
+sequential' :: HasCallStack => Layer a -> Layer a
 sequential' mk = do
     nb <- liftIO $ SequNameBuilder <$> newIORef 0
     subscope (Nothing, SomeNameBuilder nb) mk
 
-unique :: Text -> Layer a -> Layer a
+unique :: HasCallStack => Text -> Layer a -> Layer a
 unique name = subscope (Just name, SomeNameBuilder UUIDNameBuilder)
 
-unique' :: Layer a -> Layer a
+unique' :: HasCallStack => Layer a -> Layer a
 unique' = subscope (Nothing, SomeNameBuilder UUIDNameBuilder)
 
-named :: Text -> Layer a -> Layer a
+named :: HasCallStack => Text -> Layer a -> Layer a
 named name mk = do
     scopes <- ST.get
     fresh <- newIORef True
@@ -107,23 +108,25 @@ named name mk = do
     ST.put scopes
     return a
 
-getNextName :: Layer Text
+getNextName :: HasCallStack => Layer Text
 getNextName = do
-    ((_, nb) : _) <- ST.get
-    nextName nb
+    scopes <- ST.get
+    case scopes of
+        ((_, nb) : _) -> nextName nb
+        _ -> throwString ("No next name avaiable. The current scopes: " ++ show scopes)
 
-getNextNamePrefixed :: Layer Text
+getNextNamePrefixed :: HasCallStack => Layer Text
 getNextNamePrefixed = do
     name <- getNextName
     getNamePrefixed (Just name)
 
-getNamePrefixed :: Maybe Text -> Layer Text
+getNamePrefixed :: HasCallStack => Maybe Text -> Layer Text
 getNamePrefixed name = do
     scopes <- ST.get
     let comps = catMaybes $ reverse (map fst scopes) ++ [name]
     return $ RT.intercalate "." comps
 
-subscope :: (Maybe Text, SomeNameBuilder) -> Layer a -> Layer a
+subscope :: HasCallStack => (Maybe Text, SomeNameBuilder) -> Layer a -> Layer a
 subscope scope mk = do
     old_scopes <- ST.get
     ST.put (scope : old_scopes)
@@ -131,10 +134,10 @@ subscope scope mk = do
     ST.put old_scopes
     return a
 
-subscope_named :: Text -> Layer a -> Layer a
+subscope_named :: HasCallStack => Text -> Layer a -> Layer a
 subscope_named name = subscope (Just name, SomeNameBuilder UUIDNameBuilder)
 
-subscope_next_name :: Layer a -> Layer a
+subscope_next_name :: HasCallStack => Layer a -> Layer a
 subscope_next_name mk = do
     name <- getNextName
     subscope_named name mk
@@ -247,35 +250,34 @@ splitBySections num_sections axis squeeze s = do
 -- For both Symbol and NDArray
 -----------------------------------------------------------------------------
 
-pooling :: (PrimTensorOp t, Fullfilled "_Pooling" t args)
+pooling :: (PrimTensorOp t t, Fullfilled "_Pooling" t args)
         => ArgsHMap "_Pooling" t args -> TensorM t
 pooling = prim S._Pooling
 
-activation :: (PrimTensorOp t, Fullfilled "_Activation" t args)
+activation :: (PrimTensorOp t t, Fullfilled "_Activation" t args)
            => ArgsHMap "_Activation" t args -> TensorM t
 activation = prim S._Activation
 
-softmax :: (PrimTensorOp t, Fullfilled "_softmax" t args)
+softmax :: (PrimTensorOp t t, Fullfilled "_softmax" t args)
         => ArgsHMap "_softmax" t args -> TensorM t
 softmax = prim S._softmax
 
-softmaxoutput :: (PrimTensorOp t, Fullfilled "_SoftmaxOutput" t args)
+softmaxoutput :: (PrimTensorOp t t, Fullfilled "_SoftmaxOutput" t args)
               => ArgsHMap "_SoftmaxOutput" t args -> TensorM t
 softmaxoutput = prim S._SoftmaxOutput
 
-pick :: (PrimTensorOp t, Fullfilled "_pick" t args)
+pick :: (PrimTensorOp t t, Fullfilled "_pick" t args)
      => ArgsHMap "_pick" t args -> TensorM t
 pick = prim S._pick
 
-cast dt t = prim S._Cast (#dtype := dt .& #data := t .& Nil)
-stack axis ts = prim S._stack (#num_args := length ts .& #data := ts .& Nil)
+stack axis ts = prim S._stack (#num_args := length ts .& #data := ts .& #axis := axis .& Nil)
 flatten t = prim S._Flatten (#data := t .& Nil)
 identity s = prim S.__copy (#data := s .& Nil)
 dropout t p = prim S._Dropout (#data := t .& #p := p .& Nil)
 reshape shape a = prim S._Reshape (#data := a .& #shape := shape .& Nil)
 
 add_, sub_, mul_, div_, eq_, neq_, lt_, leq_, gt_, geq_ ::
-    PrimTensorOp t => t -> t -> TensorM t
+    PrimTensorOp t t => t -> t -> TensorM t
 add_ a b = prim S._elemwise_add (#lhs := a .& #rhs := b .& Nil)
 sub_ a b = prim S._elemwise_sub (#lhs := a .& #rhs := b .& Nil)
 mul_ a b = prim S._elemwise_mul (#lhs := a .& #rhs := b .& Nil)
@@ -320,10 +322,10 @@ sqrt_   a = prim S._sqrt   (#data := a .& Nil)
 log2_   a = prim S._log2   (#data := a .& Nil)
 square_ a = prim S._square (#data := a .& Nil)
 
-concat_ :: PrimTensorOp t => Int -> [t] -> TensorM t
+concat_ :: PrimTensorOp t t => Int -> [t] -> TensorM t
 concat_ d s = prim S._Concat (#data := s .& #num_args := length s .& #dim := d .& Nil)
 
-takeI :: (HasCallStack, PrimTensorOp t)
+takeI :: (HasCallStack, PrimTensorOp t t)
       => t -> t -> TensorM t
 takeI i a = prim S._take (#a := a .& #indices := i .& Nil)
 
@@ -344,11 +346,34 @@ transpose a axes = prim S._transpose (#data := a .& #axes := axes .& Nil)
 argmax a axis keepdims = prim S._argmax (#data := a .& #axis := axis .& #keepdims := keepdims .& Nil)
 
 slice_axis a axis beg end = prim S._slice_axis (#data := a .& #axis := axis .& #begin := beg .& #end := end .& Nil)
+
+-- TODO constraint the `o` to conform to `dt`
+cast :: PrimTensorOp t o
+     => EnumType '["bool", "float16", "float32", "float64", "int32", "int64", "int8", "uint8"]
+     -> t
+     -> TensorM o
+cast dt t = prim S._Cast (#dtype := dt .& #data := t .& Nil)
+
+----------------------------------------------------------------------------
+sigmoidBCE :: (PrimTensorOp t t, Monad (TensorMonad t)) => t -> t -> t -> TensorM t
+sigmoidBCE pred label sample_weight = do
+    -- pred: (B, N, 1)
+    -- label: (B, N, 1)
+    pred <- prim S._sigmoid (#data := pred .& Nil)
+    a  <- log2_ pred
+    ra <- rsubScalar 1 pred >>= log2_
+    b  <- identity label
+    rb <- rsubScalar 1 label
+    u <- mul_ a b
+    v <- mul_ ra rb
+    loss <- add_ u v >>= rsubScalar 0
+    loss <- mulBroadcast loss sample_weight
+    prim S._mean (#data := loss .& #axis := Just [0] .& #exclude := True .& Nil)
+
 -----------------------------------------------------------------------------
 -- For NDArray Only
 -----------------------------------------------------------------------------
 copy src dst = do
     [ret] <- S.__copyto (#data := src .& Nil) (Just [dst])
     return ret
-
 

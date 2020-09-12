@@ -24,7 +24,7 @@ data UnkownShapeOrScalar = UnkownShapeOrScalar Text
 instance Exception UnkownShapeOrScalar
 
 
-initialize :: forall tag dty. (HasCallStack, DType dty) => SymbolHandle -> Config dty -> IO (TaggedModuleState dty tag)
+initialize :: forall tag dty. (HasCallStack, FloatDType dty) => SymbolHandle -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
      -- give a initial batch_size = 1 for the placeholders
     let spec1 = M.difference input_shapes initializers
@@ -99,7 +99,7 @@ initialize symbol config = do
     checkTensorShape (name, STensor s) = return (name, s)
 
 
-bind :: (HasCallStack, DType dty) => SymbolHandle -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
+bind :: (HasCallStack, FloatDType dty) => SymbolHandle -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
     auxnames <- listAuxiliaryStates symbol
@@ -120,7 +120,7 @@ bind symbol context params trainable = do
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
 
-adapt :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
+adapt :: (FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
@@ -156,7 +156,7 @@ adapt inputs = do
           Just (ParameterV dst) -> void $ copy src dst
           _                     -> return ()
 
-forwardOnly :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
+forwardOnly :: (FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
 forwardOnly inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -164,7 +164,7 @@ forwardOnly inputs = do
         execForward exec False
         execGetOutputs exec
 
-fit :: (DType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
+fit :: (FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 fit inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -172,7 +172,7 @@ fit inputs = do
         execForward exec True
         execBackward exec []
 
-update :: (Optimizer opt, DType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
+update :: (Optimizer opt, FloatDType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
 update opt blacklist = do
     params <- use $ untag . mod_params
     forM_ (M.toList params) $ \case
@@ -182,7 +182,7 @@ update opt blacklist = do
     untag . mod_statistics . stat_num_upd += 1
 
 
-fitAndEval :: (DType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
+fitAndEval :: (FloatDType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
     => opt dty -> M.HashMap Text (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
 fitAndEval opt datAndLbl metric = do
     fit datAndLbl
@@ -193,7 +193,7 @@ fitAndEval opt datAndLbl metric = do
     untag . mod_scores %= M.union eval_results
 
 
-fitDataset :: (KnownSymbol tag, Dataset d, DatasetProp d e, DType a,
+fitDataset :: (KnownSymbol tag, Dataset d, DatasetProp d e, FloatDType a,
         MonadIO m, MonadThrow m, MonadReader env m, HasLogFunc env,
         HasCallStack,
         DatasetMonadConstraint d m,

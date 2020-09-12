@@ -21,16 +21,16 @@ import           MXNet.NN.Types
 -- | Abstract Evaluation type class
 class EvalMetricMethod metric where
     data MetricData metric a
-    newMetric :: (MonadIO m, DType a, HasCallStack)
+    newMetric :: (MonadIO m, FloatDType a, HasCallStack)
              => Text                          -- phase name
              -> metric a                      -- tag
              -> m (MetricData metric a)
-    evalMetric :: (MonadIO m, DType a, HasCallStack)
+    evalMetric :: (MonadIO m, FloatDType a, HasCallStack)
              => MetricData metric a           -- evaluation metric
              -> M.HashMap Text (NDArray a)    -- network bindings
              -> [NDArray a]                   -- output of the network
              -> m (M.HashMap Text Double)
-    formatMetric :: (MonadIO m, DType a, HasCallStack) => MetricData metric a -> m Text
+    formatMetric :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Text
 
 
 -- | Basic evaluation - accuracy
