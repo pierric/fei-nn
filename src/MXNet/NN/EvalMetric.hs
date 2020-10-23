@@ -1,11 +1,12 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
 module MXNet.NN.EvalMetric where
 
-import           Formatting                  (fixed, sformat, (%))
+import           Formatting                  (fixed, int, sformat, stext, (%))
 import           RIO
 import qualified RIO.HashMap                 as M
 import qualified RIO.HashMap.Partial         as M ((!))
@@ -15,6 +16,7 @@ import qualified RIO.Vector.Storable         as SV
 import qualified RIO.Vector.Storable.Partial as SV (head)
 
 import           MXNet.Base
+import           MXNet.Base.Operators.Tensor (_norm)
 import           MXNet.NN.Layer
 import           MXNet.NN.Types
 
@@ -34,84 +36,152 @@ class EvalMetricMethod metric where
 
 
 -- | Basic evaluation - accuracy
-data Accuracy a = Accuracy Text
+data AccuracyPredType = PredByThreshold Float
+    | PredByArgmax
+    | PredByArgmaxAt Int
+data Accuracy a = Accuracy
+    { _mtr_acc_name :: Text
+    , _mtr_acc_type :: AccuracyPredType
+    , _mtr_acc_min_value :: Float
+    , _mtr_acc_get_prob :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
+    , _mtr_acc_get_gt :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
+    }
 
 instance EvalMetricMethod Accuracy where
-    data MetricData Accuracy a = AccuracyData Text Text (IORef Int) (IORef Int)
-    newMetric phase (Accuracy label) = do
+    data MetricData Accuracy a = AccuracyPriv (Accuracy a) Text (IORef Int) (IORef Int)
+    newMetric phase conf = do
         a <- liftIO $ newIORef 0
         b <- liftIO $ newIORef 0
-        return $ AccuracyData phase label a b
-    evalMetric (AccuracyData phase label cntRef sumRef) bindings [output] = do
-        liftIO $ compute output (bindings M.! label)
+        return $ AccuracyPriv conf phase a b
+    evalMetric (AccuracyPriv Accuracy{..} phase cntRef sumRef) bindings outputs = liftIO $ do
+        out <- toCPU $ _mtr_acc_get_prob bindings outputs
+        lbl <- toCPU $ _mtr_acc_get_gt bindings outputs
+
+        out <- case _mtr_acc_type of
+          PredByThreshold thr -> geqScalar thr out
+          PredByArgmax        -> argmax out (Just (-1))False
+          PredByArgmaxAt axis -> argmax out (Just axis) False
+
+        valid   <- geqScalar _mtr_acc_min_value lbl
+        correct <- and_ valid =<< eq_ out lbl
+        num_correct <- SV.head <$> (toVector =<< sum_ correct Nothing False)
+        num_valid   <- SV.head <$> (toVector =<< sum_ valid Nothing False)
+
+        modifyIORef sumRef (+ floor num_correct)
+        modifyIORef cntRef (+ floor num_valid)
+
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
         let acc = fromIntegral s / fromIntegral n
-        return $ M.singleton (phase `T.append` "_acc") acc
-      where
-        compute preds@(NDArray preds_hdl) lbl = do
-            pred_cat_hdl <- argmax preds_hdl (Just 1) False
-            pred_cat <- toVector (NDArray pred_cat_hdl)
-            real_cat <- toVector lbl
-
-            batch_size <- RNE.head <$> ndshape preds
-            let correct = SV.length $ SV.filter id $ SV.zipWith (==) pred_cat real_cat
-            modifyIORef sumRef (+ correct)
-            modifyIORef cntRef (+ batch_size)
-    formatMetric (AccuracyData _ _ cntRef sumRef) = liftIO $ do
+        return $ M.singleton ((sformat (stext % "_" % stext % "_acc") phase _mtr_acc_name)) acc
+    formatMetric (AccuracyPriv Accuracy{..} _ cntRef sumRef) = liftIO $ do
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
         return $ sformat
-            ("<Accuracy: " % fixed 2 % ">")
+            ("<" % stext % "-Acc" % ": " % fixed 4 % ">")
+            _mtr_acc_name
             (100 * fromIntegral s / fromIntegral n :: Float)
 
--- | Basic evaluation - cross entropy
-data CrossEntropy a = CrossEntropy Text
+-- | Basic evaluation - vector norm
+data Norm a = Norm
+    { _mtr_norm_name :: Text
+    , _mtr_norm_ord :: Int
+    , _mtr_norm_get_array :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
+    }
 
-instance EvalMetricMethod CrossEntropy where
-    data MetricData CrossEntropy a = CrossEntropyData Text Text (IORef Int) (IORef Float)
-    newMetric phase (CrossEntropy label) = do
+instance EvalMetricMethod Norm where
+    data MetricData Norm a = NormPriv (Norm a) Text (IORef Int) (IORef Double)
+    newMetric phase conf = do
         a <- liftIO $ newIORef 0
         b <- liftIO $ newIORef 0
-        return $ CrossEntropyData phase label a b
-    -- | evaluate the log-loss.
-    -- preds is of shape (batch_size, num_category), each element along the second dimension gives the probability of the category.
-    -- label is of shape (batch_size,), each element gives the category number.
-    evalMetric (CrossEntropyData phase label cntRef sumRef) bindings [output] = do
-        liftIO $ compute output (bindings M.! label)
+        return $ NormPriv conf phase a b
+
+    evalMetric (NormPriv Norm{..} phase cntRef sumRef) bindings preds = liftIO $ do
+        array <- toCPU $ _mtr_norm_get_array bindings preds
+
+        norm <- prim _norm (#data := array .& #ord := _mtr_norm_ord .& Nil)
+        norm <- SV.head <$> toVector norm
+        batch_size :| _ <- ndshape array
+
+        modifyIORef' sumRef (+ realToFrac norm)
+        modifyIORef' cntRef (+ batch_size)
+
+        s <- readIORef sumRef
+        n <- readIORef cntRef
+        let val = s / fromIntegral n
+        return $ M.singleton (sformat (stext % "_" % stext % "_norm") phase _mtr_norm_name) val
+
+    formatMetric (NormPriv Norm{..} _ cntRef sumRef) = liftIO $ do
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
-        let loss = realToFrac s / fromIntegral n
-        return $ M.singleton (phase `T.append` "_loss") loss
-      where
-        compute preds lbl@(NDArray labelHandle) = do
-            shp1 <- ndshape preds
-            shp2 <- ndshape lbl
-            when (length shp1 /= 2 || length shp2 /= 1 || RNE.head shp1 /= RNE.head shp2) $ do
-                throwM $ MismatchedShapeInEval shp1 shp2
-            -- before call pick, we have to make sure preds and label
-            -- are in the same context
-            NDArray preds_may_copy <- do
-                c1 <- context preds
-                c2 <- context lbl
-                if c1 == c2
-                    then return preds
-                    else do
-                        preds_shap <- ndshape preds
-                        preds_copy <- makeEmptyNDArray preds_shap c2
-                        copy preds preds_copy
-                        return preds_copy
-            predprj <- pick (#data := preds_may_copy .& #index := labelHandle .& Nil)
-            predlog <- log2_ predprj
-            loss    <- sum_ predlog Nothing False >>= toVector . NDArray
-            modifyIORef sumRef (+ (negate $ SV.head loss))
-            modifyIORef cntRef (+ RNE.head shp1)
-    formatMetric (CrossEntropyData _ _ cntRef sumRef) = liftIO $ do
+        return $ sformat ("<" % stext % "-L" % int % ": " % fixed 4 % ">")
+                         _mtr_norm_name
+                         _mtr_norm_ord
+                         (realToFrac s / fromIntegral n :: Float)
+
+-- | Basic evaluation - cross entropy
+data CrossEntropy a = CrossEntropy
+    { _mtr_ce_name     :: Text
+    , _mtr_ce_gt_clsid :: Bool
+    , _mtr_ce_get_prob :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
+    , _mtr_ce_get_gt   :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
+    }
+
+instance EvalMetricMethod CrossEntropy where
+    data MetricData CrossEntropy a = CrossEntropyPriv (CrossEntropy a) Text (IORef Int) (IORef Double)
+    newMetric phase conf = do
+        a <- liftIO $ newIORef 0
+        b <- liftIO $ newIORef 0
+        return $ CrossEntropyPriv conf phase a b
+
+    evalMetric (CrossEntropyPriv CrossEntropy{..} phase cntRef sumRef) bindings preds = liftIO $ do
+        prob <- toCPU $ _mtr_ce_get_prob  bindings preds
+        gt   <- toCPU $ _mtr_ce_get_gt    bindings preds
+
+        (loss, num_valid) <-
+            if _mtr_ce_gt_clsid
+            then do
+                -- when the gt labels are class id,
+                --  prob: (a, ..., b, num_classes)
+                --  gt: (a,..,b)
+                -- dim(prob) = dim(gt) + 1
+                -- The last dimension serves as the prob dist.
+                -- We pickup the prob at the label specified class.
+                cls_prob  <- log2_ =<< addScalar 1e-5 =<< pickI gt prob
+                weights   <- geqScalar 0 gt
+                cls_prob  <- mul_ cls_prob weights
+                nloss     <- toVector =<< sum_ cls_prob Nothing False
+                num_valid <- toVector =<< sum_ weights Nothing False
+                return (negate (SV.head nloss), SV.head num_valid)
+            else do
+                -- when the gt are onehot vector
+                --   prob: (a, .., b, num_classes)
+                --   gt:   (a, .., b, num_classes)
+                -- dim(prob) == dim(gt)
+                term1     <- mul_ gt =<< log2_ =<< addScalar 1e-5 prob
+                a         <- log2_   =<< addScalar 1e-5 =<< rsubScalar 1 prob
+                term2     <- mul_ a  =<< rsubScalar 1 gt
+                weights   <- geqScalar 0 gt
+                nloss     <- mul_ weights =<< add_ term1 term2
+                nloss     <- toVector =<< sum_ nloss Nothing False
+                num_valid <- toVector =<< sum_ weights Nothing False
+                return (negate (SV.head nloss), SV.head num_valid)
+
+        modifyIORef' sumRef (+ realToFrac loss)
+        modifyIORef' cntRef (+ floor num_valid)
+
+        s <- readIORef sumRef
+        n <- readIORef cntRef
+        let val = s / fromIntegral n
+        return $ M.singleton (sformat (stext % "_" % stext % "_ce") phase _mtr_ce_name) val
+
+    formatMetric (CrossEntropyPriv CrossEntropy{..} _ cntRef sumRef) = liftIO $ do
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
-        return $ sformat
-            ("<CE: " % fixed 2 % ">")
-            (realToFrac s / fromIntegral n :: Float)
+        return $ sformat ("<" % stext % "-CE" % ": " % fixed 4 % ">")
+                         _mtr_ce_name
+                         (realToFrac s / fromIntegral n :: Float)
+
 
 data ListOfMetric ms a where
     MNil :: ListOfMetric '[] a
