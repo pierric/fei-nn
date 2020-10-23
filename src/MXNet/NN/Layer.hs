@@ -1,6 +1,6 @@
+{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE PartialTypeSignatures  #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE UndecidableInstances   #-}
 module MXNet.NN.Layer where
 
@@ -9,6 +9,7 @@ import qualified Data.UUID.V4                as UUID
 import           Formatting                  (formatToString, int, shown, stext,
                                               (%))
 import           RIO
+import qualified RIO.NonEmpty                as NE
 import qualified RIO.State                   as ST
 import qualified RIO.Text                    as RT
 import           System.IO.Unsafe            (unsafePerformIO)
@@ -145,6 +146,15 @@ subscope_next_name mk = do
 
 variable :: Text -> Layer SymbolHandle
 variable name = getNamePrefixed (Just name) >>= liftIO . mxSymbolCreateVariable
+
+constant :: NonEmpty Int -> [Float] -> Layer SymbolHandle
+constant shape value = do
+    name <- getNextNamePrefixed
+    let build = do var <- mxSymbolCreateVariable name
+                   mxSymbolSetAttr var "__shape__" (tshow $ NE.toList shape)
+                   mxSymbolSetAttr var "__init__"  (tshow value)
+                   return var
+    named (RT.concat [name, ".sg"]) $ blockGrad =<< liftIO build
 
 convolution :: (HasArgs "_Convolution" SymbolHandle args
                     '["kernel", "num_filter", "data", "stride", "dilate", "pad",
@@ -290,6 +300,11 @@ leq_  a b = prim S.__lesser_equal (#lhs := a .& #rhs := b .& Nil)
 gt_   a b = prim S.__greater (#lhs := a .& #rhs := b .& Nil)
 geq_  a b = prim S.__greater_equal (#lhs := a .& #rhs := b .& Nil)
 
+and_  a b = prim S.__logical_and (#lhs := a .& #rhs := b .& Nil)
+or_   a b = prim S.__logical_or  (#lhs := a .& #rhs := b .& Nil)
+xor_  a b = prim S.__logical_xor (#lhs := a .& #rhs := b .& Nil)
+not_  a   = prim S._logical_not  (#data := a .& Nil)
+
 addScalar  b a = prim S.__plus_scalar (#data := a .& #scalar := b .& Nil)
 subScalar  b a = prim S.__minus_scalar (#data := a .& #scalar := b .& Nil)
 rsubScalar b a = prim S.__rminus_scalar (#data := a .& #scalar := b .& Nil)
@@ -303,6 +318,10 @@ ltScalar  b a = prim S.__lesser_scalar (#data := a .& #scalar := b .& Nil)
 leqScalar b a = prim S.__lesser_equal_scalar (#data := a .& #scalar := b .& Nil)
 gtScalar  b a = prim S.__greater_scalar (#data := a .& #scalar := b .& Nil)
 geqScalar b a = prim S.__greater_equal_scalar (#data := a .& #scalar := b .& Nil)
+
+andScalar b a = prim S.__logical_and_scalar (#data := a .& #scalar := b .& Nil)
+orScalar  b a = prim S.__logical_or_scalar  (#data := a .& #scalar := b .& Nil)
+xorScalar b a = prim S.__logical_xor_scalar (#data := a .& #scalar := b .& Nil)
 
 addBroadcast a b = prim S._broadcast_add (#lhs := a .& #rhs := b .& Nil)
 subBroadcast a b = prim S._broadcast_sub (#lhs := a .& #rhs := b .& Nil)
@@ -328,6 +347,10 @@ concat_ d s = prim S._Concat (#data := s .& #num_args := length s .& #dim := d .
 takeI :: (HasCallStack, PrimTensorOp t t)
       => t -> t -> TensorM t
 takeI i a = prim S._take (#a := a .& #indices := i .& Nil)
+
+pickI :: (HasCallStack, PrimTensorOp t t)
+      => t -> t -> TensorM t
+pickI i t = prim S._pick (#data := t .& #index := i .& Nil)
 
 where_ c a b = prim S._where (#condition := c .& #x := a .& #y := b .& Nil)
 
@@ -355,24 +378,37 @@ cast :: PrimTensorOp t o
 cast dt t = prim S._Cast (#dtype := dt .& #data := t .& Nil)
 
 ----------------------------------------------------------------------------
-sigmoidBCE :: (PrimTensorOp t t, Monad (TensorMonad t)) => t -> t -> t -> TensorM t
+sigmoidBCE :: (PrimTensorOp t t, Monad (TensorMonad t)) => t -> t -> Maybe t -> TensorM t
 sigmoidBCE pred label sample_weight = do
-    -- pred: (B, N, 1)
-    -- label: (B, N, 1)
-    pred <- prim S._sigmoid (#data := pred .& Nil)
-    a  <- log2_ pred
-    ra <- rsubScalar 1 pred >>= log2_
-    b  <- identity label
-    rb <- rsubScalar 1 label
-    u <- mul_ a b
-    v <- mul_ ra rb
-    loss <- add_ u v >>= rsubScalar 0
-    loss <- mulBroadcast loss sample_weight
+    -- pred: (B, C, 1)
+    -- label: (B, C, 1)
+
+    a <- prim S._relu (#data := pred .& Nil)
+    b <- mul_ pred label
+    c <- prim S._abs (#data := pred .& Nil) >>= rsubScalar 0
+    c <- prim S._Activation (#data := c .& #act_type := #softrelu .& Nil)
+    loss <- add_ c =<< sub_ a b
+    loss <- case sample_weight of
+              Just w  -> mulBroadcast loss w
+              Nothing -> return loss
+    prim S._mean (#data := loss .& #axis := Just [0] .& #exclude := True .& Nil)
+
+softmaxCE :: (PrimTensorOp t t, Monad (TensorMonad t)) => Int -> t -> t -> Maybe t -> TensorM t
+softmaxCE axis pred label sample_weight = do
+    pred <- prim S._log_softmax (#data := pred .& #axis := axis .& Nil)
+    labl <- prim S._reshape_like (#lhs := label .& #rhs := pred .& Nil)
+    loss <- mul_ pred labl
+    loss <- sum_ loss (Just [axis]) True >>= rsubScalar 0
+    loss <- case sample_weight of
+              Just w  -> mulBroadcast loss w
+              Nothing -> return loss
     prim S._mean (#data := loss .& #axis := Just [0] .& #exclude := True .& Nil)
 
 -----------------------------------------------------------------------------
 -- For NDArray Only
 -----------------------------------------------------------------------------
+copy :: (HasCallStack, PrimTensorOp t t, TensorApply t ~ (Maybe [t] -> IO [t]))
+     => t -> t -> IO t
 copy src dst = do
     [ret] <- S.__copyto (#data := src .& Nil) (Just [dst])
     return ret
