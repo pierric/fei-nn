@@ -1,4 +1,5 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE RecordWildCards       #-}
 module MXNet.NN.Utils where
 
 import           Control.Lens         (use)
@@ -12,7 +13,8 @@ import           RIO.List             (lastMaybe, sortOn)
 import qualified RIO.NonEmpty         as RNE
 import qualified RIO.Text             as T
 
-import           MXNet.Base           (Context (..), NDArray (..))
+import           MXNet.Base           (Context (..), DType, NDArray (..),
+                                       ndshape)
 import           MXNet.Base.Raw       (mxNDArrayLoad, mxNDArraySave,
                                        mxSymbolSaveToFile)
 import           MXNet.NN.Layer       (copy)
@@ -70,7 +72,7 @@ saveState save_symbol name = do
     getModelParam (key, ParameterG a _) = Just (key, unNDArray a)
     getModelParam (key, ParameterA a)   = Just (key, unNDArray a)
 
-loadState :: (MonadIO m, MonadReader env m, HasLogFunc env, HasCallStack)
+loadState :: (DType a, MonadIO m, MonadReader env m, HasLogFunc env, HasCallStack)
     => String -> [Text] -> Module t a m ()
 loadState weights_filename ignores = do
     arrays <- liftIO $ mxNDArrayLoad (T.pack $ weights_filename ++ ".params")
@@ -81,15 +83,30 @@ loadState weights_filename ignores = do
                 return ()
             (_, Nothing) ->
                 lift $ logInfo $ display $ sformat ("Tensor " % stext % " is missing.") name
-            (_, Just (ParameterG target _)) ->
+            (_, Just (ParameterG target _)) -> do
+                checkShape name (NDArray hdl) target
                 liftIO $ void $ copy hdl (unNDArray target)
-            (_, Just (ParameterF target)) ->
+            (_, Just (ParameterF target))   -> do
+                checkShape name (NDArray hdl) target
                 liftIO $ void $ copy hdl (unNDArray target)
-            (_, Just (ParameterA target)) ->
+            (_, Just (ParameterA target))   -> do
+                checkShape name (NDArray hdl) target
                 liftIO $ void $ copy hdl (unNDArray target)
             (_, Just (ParameterV _)) ->
                 logWarn . display $ sformat
                     ("a variable (" % stext % ") found in the state file.") name
+    where
+        checkShape :: (MonadReader env m, HasLogFunc env, MonadIO m, DType a)
+                   => Text -> NDArray a -> NDArray a -> m ()
+        checkShape name arr1 arr2 = do
+            shp1 <- liftIO $ ndshape $ arr1
+            shp2 <- liftIO $ ndshape $ arr2
+            when (shp1 /= shp2) $
+                logWarn . display $ sformat
+                    ("variable (" % stext %
+                     ") has shape " % stext %
+                     ", different from that in saved state " % stext %
+                     ".") name (tshow shp2) (tshow shp1)
 
 lastSavedState :: MonadIO m => Text -> Text -> m (Maybe FilePath)
 lastSavedState dir prefix = liftIO $ do
