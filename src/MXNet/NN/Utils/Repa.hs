@@ -12,7 +12,7 @@ import qualified RIO.Vector.Unboxed as VU
 import qualified RIO.Vector.Unboxed.Partial as VU (maxIndex)
 import Control.Exception (throw)
 import Control.Lens
-import Data.Array.Repa (Shape, Array, U, DIM1, DIM2, DIM3, All(..), Z(..), (:.)(..), extent, toUnboxed)
+import Data.Array.Repa (Shape, Array, U, DIM1, DIM2, DIM3, DIM4, All(..), Z(..), (:.)(..), extent, toUnboxed)
 import qualified Data.Array.Repa as Repa
 import Text.PrettyPrint.Leijen.Text (Pretty(..), (<+>), textStrict)
 
@@ -94,6 +94,10 @@ instance Unstackable DIM3 where
     type SliceAtAxis0 DIM3 = Z:.Int:.All:.All
     makeSliceAtAxis0 (sh:._) i = makeSliceAtAxis0 sh i :. All
 
+instance Unstackable DIM4 where
+    type PredDIM DIM4 = DIM3
+    type SliceAtAxis0 DIM4 = Z:.Int:.All:.All:.All
+    makeSliceAtAxis0 (sh:._) i = makeSliceAtAxis0 sh i :. All
 
 data ReshapeError = ReshapeMismatch (V.Vector Int) (V.Vector Int)
                   | ReshapeTooManyMinusOne (V.Vector Int)
