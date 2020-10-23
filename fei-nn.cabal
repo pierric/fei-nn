@@ -19,6 +19,7 @@ Library
                             MXNet.NN.Utils
                             MXNet.NN.Utils.GraphViz
                             MXNet.NN.Utils.Repa
+                            MXNet.NN.Utils.Render
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
                             MXNet.NN.LrScheduler
@@ -48,6 +49,7 @@ Library
                             DoAndIfThenElse,
                             TypeApplications,
                             DataKinds,
+                            RecordWildCards,
                             ExplicitForAll,
                             ExistentialQuantification,
                             NoImplicitPrelude
@@ -70,6 +72,9 @@ Library
                           , formatting
                           , wl-pprint-text
                           , repa
+                          , Rasterific
+                          , JuicyPixels
+                          , FontyFruity
                           , rio
                           , uuid
                           , fei-base
