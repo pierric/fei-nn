@@ -3,7 +3,6 @@
 module MXNet.NN.Utils where
 
 import           Control.Lens         (use)
-import           Data.Maybe           (mapMaybe)
 import           Formatting
 import           RIO
 import           RIO.Directory        (getModificationTime, listDirectory)
@@ -62,15 +61,16 @@ saveState :: MonadIO m => Bool -> String -> Module t a m ()
 saveState save_symbol name = do
     params <- use (untag . mod_params)
     symbol <- use (untag . mod_symbol)
-    let modelParams = mapMaybe getModelParam $ M.toList params
+    let modelParams = concatMap getModelParam $ M.toList params
     liftIO $ do
         when save_symbol $ mxSymbolSaveToFile (T.pack $ name ++ ".json") symbol
         mxNDArraySave (T.pack $ name ++ ".params") modelParams
   where
-    getModelParam (_,   ParameterV _)   = Nothing
-    getModelParam (key, ParameterF a)   = Just (key, unNDArray a)
-    getModelParam (key, ParameterG a _) = Just (key, unNDArray a)
-    getModelParam (key, ParameterA a)   = Just (key, unNDArray a)
+    getModelParam (_,   ParameterV _)   = []
+    getModelParam (key, ParameterF a)   = [(key, unNDArray a)]
+    getModelParam (key, ParameterA a)   = [(key, unNDArray a)]
+    getModelParam (key, ParameterG a g) =
+        [(key, unNDArray a), (key `T.append` "__grad", unNDArray g)]
 
 loadState :: (DType a, MonadIO m, MonadReader env m, HasLogFunc env, HasCallStack)
     => String -> [Text] -> Module t a m ()
@@ -78,23 +78,35 @@ loadState weights_filename ignores = do
     arrays <- liftIO $ mxNDArrayLoad (T.pack $ weights_filename ++ ".params")
     params <- use (untag . mod_params)
     forM_ arrays $ \(name, hdl) -> do
-        case (name `elem` ignores, M.lookup name params) of
-            (True, _) ->
+        let nameIfGrad = T.stripSuffix "__grad" name
+            nameIngore = name `elem` ignores
+            param1 = M.lookup name params
+            param2 = nameIfGrad >>= flip M.lookup params
+        case (nameIngore, param1, nameIfGrad, param2) of
+            (True, _, _, _) ->
                 return ()
-            (_, Nothing) ->
-                lift $ logInfo $ display $ sformat ("Tensor " % stext % " is missing.") name
-            (_, Just (ParameterG target _)) -> do
-                checkShape name (NDArray hdl) target
+            (_, Nothing, _, Nothing) ->
+                lift $ logInfo $ display $ sformat
+                    ("Tensor " % stext % " is ignored as missing in the model.") name
+            (_, Nothing, Just name', Just (ParameterG _ target)) -> do
+                checkShape name' (NDArray hdl) target
                 liftIO $ void $ copy hdl (unNDArray target)
-            (_, Just (ParameterF target))   -> do
-                checkShape name (NDArray hdl) target
-                liftIO $ void $ copy hdl (unNDArray target)
-            (_, Just (ParameterA target))   -> do
-                checkShape name (NDArray hdl) target
-                liftIO $ void $ copy hdl (unNDArray target)
-            (_, Just (ParameterV _)) ->
+            (_, Nothing, Just name', Just _) -> do
+                -- we silently ignore any missing grad,
+                -- for it is too common if we load the model for inference
+                return ()
+            (_, Just (ParameterV _), _, _) ->
                 logWarn . display $ sformat
-                    ("a variable (" % stext % ") found in the state file.") name
+                    ("Tensor " % stext % " is ignored as a variable in the model.") name
+            (_, Just (ParameterG target _), _, _) -> do
+                checkShape name (NDArray hdl) target
+                liftIO $ void $ copy hdl (unNDArray target)
+            (_, Just (ParameterF target), _, _)   -> do
+                checkShape name (NDArray hdl) target
+                liftIO $ void $ copy hdl (unNDArray target)
+            (_, Just (ParameterA target), _, _)   -> do
+                checkShape name (NDArray hdl) target
+                liftIO $ void $ copy hdl (unNDArray target)
     where
         checkShape :: (MonadReader env m, HasLogFunc env, MonadIO m, DType a)
                    => Text -> NDArray a -> NDArray a -> m ()
