@@ -378,8 +378,11 @@ cast :: PrimTensorOp t o
 cast dt t = prim S._Cast (#dtype := dt .& #data := t .& Nil)
 
 ----------------------------------------------------------------------------
-sigmoidBCE :: (PrimTensorOp t t, Monad (TensorMonad t)) => t -> t -> Maybe t -> TensorM t
-sigmoidBCE pred label sample_weight = do
+data LossAgg = AggMean | AggSum
+
+sigmoidBCE :: (PrimTensorOp t t, Monad (TensorMonad t))
+           => t -> t -> Maybe t -> LossAgg -> TensorM t
+sigmoidBCE pred label sample_weight agg = do
     -- pred: (B, C, 1)
     -- label: (B, C, 1)
 
@@ -391,7 +394,9 @@ sigmoidBCE pred label sample_weight = do
     loss <- case sample_weight of
               Just w  -> mulBroadcast loss w
               Nothing -> return loss
-    prim S._mean (#data := loss .& #axis := Just [0] .& #exclude := True .& Nil)
+    case agg of
+      AggMean -> prim S._mean (#data := loss .& #axis := Just [0] .& #exclude := True .& Nil)
+      AggSum  -> prim S._sum  (#data := loss .& #axis := Just [0] .& #exclude := True .& Nil)
 
 softmaxCE :: (PrimTensorOp t t, Monad (TensorMonad t)) => Int -> t -> t -> Maybe t -> TensorM t
 softmaxCE axis pred label sample_weight = do
