@@ -12,6 +12,11 @@ category:                   Machine Learning, AI
 build-type:                 Simple
 cabal-version:              1.24
 
+Flag mxnet_geq_10600 {
+  Description: MXNet >= 1.6.0
+  Default: False
+}
+
 Library
     exposed-modules:        MXNet.NN
                             MXNet.NN.Types
@@ -78,3 +83,6 @@ Library
                           , rio
                           , uuid
                           , fei-base
+    if flag(mxnet_geq_10600) {
+      cpp-options:        -DMXNET_GEQ_10600
+    }

@@ -1,13 +1,8 @@
+{-# LANGUAGE CPP                  #-}
 {-# LANGUAGE ConstraintKinds      #-}
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE OverloadedLists      #-}
 {-# LANGUAGE UndecidableInstances #-}
-
-module MXNet.NN.Optimizer (
-    Optimizer(..),
-    OptimizerTag(..)
-) where
+module MXNet.NN.Optimizer where
 
 import           Control.Lens                (use, (.=))
 import           GHC.Exts                    (Constraint)
@@ -64,10 +59,9 @@ instance Optimizer SGD_Opt where
         nup <- use $ untag . mod_statistics . stat_num_upd
         let lr = getLR sch nup
         untag . mod_statistics . stat_last_lr .= lr
-        liftIO $ void $ T._sgd_update
-            (#weight := weight   .&
-             #grad   := gradient .&
-             #lr     := lr       .& args)
+        liftIO $ void $ T._sgd_update (#weight := weight
+                                    .& #grad   := gradient
+                                    .& #lr     := lr .& args)
             (Just [weight])
 
 -- | SGD with momentum optimizer
@@ -100,12 +94,18 @@ instance Optimizer SGD_Mom_Opt where
                     writeIORef emaref (M.insert symbol mom ema)
                     return mom
                 Just a -> return a
-            void $ T._sgd_mom_update
-                (#weight := weight   .&
-                 #grad   := gradient .&
-                 #mom    := momentum .&
-                 #lr     := lr       .& args)
+            -- let norm x = prim T._norm (#data := x .& #ord := 1 .& Nil)
+            -- [w0] <- toVector =<< norm weight
+            -- [m0] <- toVector =<< norm momentum
+            -- [g0] <- toVector =<< norm gradient
+            void $ T._sgd_mom_update (#weight := weight
+                                   .& #grad   := gradient
+                                   .& #mom    := momentum
+                                   .& #lr     := lr .& args)
                 (Just [weight])
+            -- [w1] <- toVector =<< norm weight
+            -- [m1] <- toVector =<< norm momentum
+            -- traceShowM ("opt", symbol, w0, m0, g0, w1, m1)
 
 -- | ADAM optmizer
 data ADAM_Opt dtype where
@@ -138,10 +138,53 @@ instance Optimizer ADAM_Opt where
                     writeIORef emaref (M.insert symbol (avg, var) ema)
                     return (avg, var)
                 Just (a, v) -> return (a, v)
-            void $ T._adam_update
+            void $ T._adam_update (#weight := weight
+                                .& #grad   := gradient
+                                .& #mean   := moving_avg
+                                .& #var    := moving_var
+                                .& #lr     := lr .& args)
+                (Just [weight])
+
+
+#ifdef MXNET_GEQ_10600
+
+data ADAMW_Opt dtype where
+    ADAMW_Opt :: (LrScheduler sch, OptimizerCst ADAMW_Opt dtype args)
+              => sch -> ArgsHMap (OptimizerSym ADAMW_Opt) (NDArray dtype) args
+              -> IORef (M.HashMap Text (NDArray dtype, NDArray dtype))
+              -> ADAMW_Opt dtype
+
+type instance OptimizerSym ADAMW_Opt = "__adamw_update"
+type instance OptimizerCst ADAMW_Opt dt args =
+    HasArgs (OptimizerSym ADAMW_Opt) (NDArray dt) args
+            '["beta1", "beta2", "epsilon", "wd", "eta", "clip_gradient", "rescale_grad"]
+
+instance Optimizer ADAMW_Opt where
+    data OptimizerTag ADAMW_Opt = ADAMW
+    makeOptimizer ADAMW sch args = do
+        empty <- newIORef M.empty
+        return $ ADAMW_Opt sch args empty
+
+    optimize (ADAMW_Opt sch args emaref) symbol weight gradient = do
+        nup <- use $ untag . mod_statistics . stat_num_upd
+        let lr = getLR sch nup
+        untag . mod_statistics . stat_last_lr .= lr
+        liftIO $ do
+            ema <- readIORef emaref
+            (moving_avg, moving_var) <- case M.lookup symbol ema of
+                Nothing    -> do
+                    avg <- prim T._zeros_like (#data := weight .& Nil)
+                    var <- prim T._ones_like  (#data := weight .& Nil)
+                    writeIORef emaref (M.insert symbol (avg, var) ema)
+                    return (avg, var)
+                Just (a, v) -> return (a, v)
+            void $ T.__adamw_update
                 (#weight := weight     .&
                  #grad   := gradient   .&
                  #mean   := moving_avg .&
                  #var    := moving_var .&
                  #lr     := lr         .& args)
                 (Just [weight])
+
+#endif
+
