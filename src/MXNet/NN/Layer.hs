@@ -18,8 +18,8 @@ import           MXNet.Base
 import qualified MXNet.Base.Operators.Tensor as S
 import qualified MXNet.NN.Types              as S
 
-runLayerBuilder :: Layer a -> IO a
-runLayerBuilder = flip ST.evalStateT []
+runLayerBuilder :: MonadIO m => Layer a -> m a
+runLayerBuilder = liftIO . flip ST.evalStateT []
 
 type instance TensorMonad SymbolHandle  = Layer
 

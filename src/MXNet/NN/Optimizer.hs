@@ -26,10 +26,10 @@ class Optimizer (opt :: * -> *) where
     -- | Specific optional arguments
     -- type OptArgsList opt :: [KV *]
     -- | make the optimizer
-    makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args)
+    makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args, MonadIO m)
                   => OptimizerTag opt -> sch
                   -> ArgsHMap (OptimizerSym opt) (NDArray dtype) args
-                  -> IO (opt dtype)
+                  -> m (opt dtype)
     -- | run the optimizer with the input & expected tensor
     optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) m, MonadIO m)
              => opt dtype                            -- optimizer
