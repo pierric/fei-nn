@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
@@ -23,6 +24,9 @@ module MXNet.NN (
     fa_session,
     fa_extra,
     runFeiM,
+#ifdef NEPTUNE
+    runFeiM'nept,
+#endif
     initSession,
 ) where
 
@@ -45,6 +49,10 @@ import           MXNet.NN.Types
 import           MXNet.NN.Utils
 import           MXNet.NN.Utils.GraphViz
 import           MXNet.NN.Utils.Repa
+
+#ifdef NEPTUNE
+import           Neptune.Client
+#endif
 
 data FeiApp t n x = FeiApp
     { _fa_log_func        :: !LogFunc
@@ -81,6 +89,13 @@ runFeiM x body = do
         withLogFunc logopt $ \logfunc ->
             flip runReaderT (FeiApp logfunc pcontx session x) body
 
+#ifdef NEPTUNE
+runFeiM'nept :: FloatDType t => Text -> x -> ((Text -> t -> IO ()) -> FeiM t n x a) -> IO a
+runFeiM'nept project x body =
+    withNept project $ \ _ experiment ->
+        let logger k v = nlog experiment k (fromRational (toRational v) :: Double)
+         in runFeiM x (body logger)
+#endif
 
 initSession :: forall n t x. FloatDType t => SymbolHandle -> Config t -> FeiM t n x ()
 initSession sym cfg = do
