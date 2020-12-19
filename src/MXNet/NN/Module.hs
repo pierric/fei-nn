@@ -236,7 +236,7 @@ fitAndEval opt datAndLbl metric = do
     update opt M.empty
     exec <- use $ untag . mod_executor
     out  <- liftIO $ execGetOutputs exec
-    eval_results <- evalMetric metric datAndLbl out
+    eval_results <- metricUpdate metric datAndLbl out
     untag . mod_scores %= M.union eval_results
 
 
@@ -272,7 +272,7 @@ fitDataset sess trainDataset valDataset make_binding opt metric epochs = do
             -- forM_ callbacks (begOfBatch i batchSize)
             let binding = make_binding variables  item
             fitAndEval opt binding trainMetricData
-            eval <- formatMetric trainMetricData
+            eval <- metricFormat trainMetricData
             logInfo . display $ sformat (int % int % stext) i total eval
             -- forM_ callbacks (endOfBatch i batchSize)
 
@@ -284,8 +284,8 @@ fitDataset sess trainDataset valDataset make_binding opt metric epochs = do
             let binding = make_binding variables  item
             -- TODO: it is bad to pass labels to forwardOnly
             out <- forwardOnly binding
-            evalMetric valMetricData binding out
-        eval <- formatMetric valMetricData
+            metricUpdate valMetricData binding out
+        eval <- metricFormat valMetricData
         logInfo $ display eval
         --
         -- forM_ callbacks (endOfVal epochInd total)

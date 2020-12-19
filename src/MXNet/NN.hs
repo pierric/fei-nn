@@ -26,6 +26,7 @@ module MXNet.NN (
     runFeiM,
 #ifdef NEPTUNE
     runFeiM'nept,
+    neptLog,
 #endif
     initSession,
 ) where
@@ -52,6 +53,7 @@ import           MXNet.NN.Utils.Repa
 
 #ifdef NEPTUNE
 import           Neptune.Client
+import           Neptune.Session              (Experiment, NeptuneSession)
 #endif
 
 data FeiApp t n x = FeiApp
@@ -90,11 +92,19 @@ runFeiM x body = do
             flip runReaderT (FeiApp logfunc pcontx session x) body
 
 #ifdef NEPTUNE
-runFeiM'nept :: FloatDType t => Text -> x -> ((Text -> t -> IO ()) -> FeiM t n x a) -> IO a
+type Extra'Nept x = (x, NeptuneSession, Experiment, Text -> Double -> IO ())
+runFeiM'nept :: FloatDType t
+             => Text -> x -> FeiM t n (Extra'Nept x) a -> IO a
 runFeiM'nept project x body =
-    withNept project $ \ _ experiment ->
-        let logger k v = nlog experiment k (fromRational (toRational v) :: Double)
-         in runFeiM x (body logger)
+    withNept project $ \ nsess nexpt ->
+        let logger k v = nlog nexpt k (fromRational (toRational v) :: Double)
+         in runFeiM (x, nsess, nexpt, logger) body
+
+neptLog :: Text -> Double -> FeiM t n (Extra'Nept x) ()
+neptLog key value = do
+    logger <- view $ fa_extra . _4
+    liftIO $ logger key value
+
 #endif
 
 initSession :: forall n t x. FloatDType t => SymbolHandle -> Config t -> FeiM t n x ()

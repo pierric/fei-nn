@@ -24,15 +24,21 @@ import           MXNet.NN.Types
 class EvalMetricMethod metric where
     data MetricData metric a
     newMetric :: (MonadIO m, FloatDType a, HasCallStack)
-             => Text                          -- phase name
-             -> metric a                      -- tag
-             -> m (MetricData metric a)
-    evalMetric :: (MonadIO m, FloatDType a, HasCallStack)
-             => MetricData metric a           -- evaluation metric
-             -> M.HashMap Text (NDArray a)    -- network bindings
-             -> [NDArray a]                   -- output of the network
-             -> m (M.HashMap Text Double)
-    formatMetric :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Text
+              => Text                          -- phase name
+              -> metric a                      -- tag
+              -> m (MetricData metric a)
+    metricUpdate :: (MonadIO m, FloatDType a, HasCallStack)
+                 => MetricData metric a           -- evaluation metric
+                 -> M.HashMap Text (NDArray a)    -- network bindings
+                 -> [NDArray a]                   -- output of the network
+                 -> m (M.HashMap Text Double)
+    metricName   :: MetricData metric a -> Text
+    metricValue  :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Double
+    metricFormat :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Text
+    metricFormat m = do
+        name  <- pure (metricName m)
+        value <- metricValue m
+        return $ sformat ("<" % stext % ": " % fixed 4 % ">") name value
 
 
 -- | Basic evaluation - accuracy
@@ -40,9 +46,9 @@ data AccuracyPredType = PredByThreshold Float
     | PredByArgmax
     | PredByArgmaxAt Int
 data Accuracy a = Accuracy
-    { _mtr_acc_name :: Text
+    { _mtr_acc_name :: Maybe Text
     , _mtr_acc_type :: AccuracyPredType
-    , _mtr_acc_min_value :: Float
+    , _mtr_acc_min_value :: Float  -- | to filter values less than min
     , _mtr_acc_get_prob :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
     , _mtr_acc_get_gt :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
     }
@@ -53,7 +59,8 @@ instance EvalMetricMethod Accuracy where
         a <- liftIO $ newIORef 0
         b <- liftIO $ newIORef 0
         return $ AccuracyPriv conf phase a b
-    evalMetric (AccuracyPriv Accuracy{..} phase cntRef sumRef) bindings outputs = liftIO $ do
+
+    metricUpdate mtr@(AccuracyPriv Accuracy{..} phase cntRef sumRef) bindings outputs = liftIO $ do
         out <- toCPU $ _mtr_acc_get_prob bindings outputs
         lbl <- toCPU $ _mtr_acc_get_gt bindings outputs
 
@@ -70,21 +77,21 @@ instance EvalMetricMethod Accuracy where
         modifyIORef sumRef (+ floor num_correct)
         modifyIORef cntRef (+ floor num_valid)
 
+        value <- metricValue mtr
+        return $ M.singleton (metricName mtr) value
+
+    metricName (AccuracyPriv Accuracy{..} phase _ _) =
+        let name = fromMaybe "acc" _mtr_acc_name
+         in sformat (stext % "_" % stext) phase name
+
+    metricValue (AccuracyPriv _ _ cntRef sumRef) = liftIO $ do
         s <- liftIO $ readIORef sumRef
         n <- liftIO $ readIORef cntRef
-        let acc = fromIntegral s / fromIntegral n
-        return $ M.singleton ((sformat (stext % "_" % stext % "_acc") phase _mtr_acc_name)) acc
-    formatMetric (AccuracyPriv Accuracy{..} _ cntRef sumRef) = liftIO $ do
-        s <- liftIO $ readIORef sumRef
-        n <- liftIO $ readIORef cntRef
-        return $ sformat
-            ("<" % stext % "-Acc" % ": " % fixed 4 % ">")
-            _mtr_acc_name
-            (100 * fromIntegral s / fromIntegral n :: Float)
+        return (100 * fromIntegral s / fromIntegral n)
 
 -- | Basic evaluation - vector norm
 data Norm a = Norm
-    { _mtr_norm_name :: Text
+    { _mtr_norm_name :: Maybe Text
     , _mtr_norm_ord :: Int
     , _mtr_norm_get_array :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
     }
@@ -96,7 +103,7 @@ instance EvalMetricMethod Norm where
         b <- liftIO $ newIORef 0
         return $ NormPriv conf phase a b
 
-    evalMetric (NormPriv Norm{..} phase cntRef sumRef) bindings preds = liftIO $ do
+    metricUpdate mtr@(NormPriv Norm{..} phase cntRef sumRef) bindings preds = liftIO $ do
         array <- toCPU $ _mtr_norm_get_array bindings preds
 
         norm <- prim _norm (#data := array .& #ord := _mtr_norm_ord .& Nil)
@@ -106,22 +113,22 @@ instance EvalMetricMethod Norm where
         modifyIORef' sumRef (+ realToFrac norm)
         modifyIORef' cntRef (+ batch_size)
 
+        value <- metricValue mtr
+        return $ M.singleton (metricName mtr) value
+
+    metricName (NormPriv Norm{..} phase _ _) =
+        let lk = sformat ("_L" % int) _mtr_norm_ord
+            name = fromMaybe lk _mtr_norm_name
+         in sformat (stext % "_" % stext) phase name
+
+    metricValue (NormPriv _ _ cntRef sumRef) = liftIO $ do
         s <- readIORef sumRef
         n <- readIORef cntRef
-        let val = s / fromIntegral n
-        return $ M.singleton (sformat (stext % "_" % stext % "_norm") phase _mtr_norm_name) val
-
-    formatMetric (NormPriv Norm{..} _ cntRef sumRef) = liftIO $ do
-        s <- liftIO $ readIORef sumRef
-        n <- liftIO $ readIORef cntRef
-        return $ sformat ("<" % stext % "-L" % int % ": " % fixed 4 % ">")
-                         _mtr_norm_name
-                         _mtr_norm_ord
-                         (realToFrac s / fromIntegral n :: Float)
+        return $ realToFrac s / fromIntegral n
 
 -- | Basic evaluation - cross entropy
 data CrossEntropy a = CrossEntropy
-    { _mtr_ce_name     :: Text
+    { _mtr_ce_name     :: Maybe Text
     , _mtr_ce_gt_clsid :: Bool
     , _mtr_ce_get_prob :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
     , _mtr_ce_get_gt   :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
@@ -134,7 +141,7 @@ instance EvalMetricMethod CrossEntropy where
         b <- liftIO $ newIORef 0
         return $ CrossEntropyPriv conf phase a b
 
-    evalMetric (CrossEntropyPriv CrossEntropy{..} phase cntRef sumRef) bindings preds = liftIO $ do
+    metricUpdate mtr@(CrossEntropyPriv CrossEntropy{..} phase cntRef sumRef) bindings preds = liftIO $ do
         prob <- toCPU $ _mtr_ce_get_prob  bindings preds
         gt   <- toCPU $ _mtr_ce_get_gt    bindings preds
 
@@ -170,17 +177,17 @@ instance EvalMetricMethod CrossEntropy where
         modifyIORef' sumRef (+ realToFrac loss)
         modifyIORef' cntRef (+ floor num_valid)
 
+        value <- metricValue mtr
+        return $ M.singleton (metricName mtr) value
+
+    metricName (CrossEntropyPriv CrossEntropy{..} phase _ _) =
+        let name = fromMaybe "ce" _mtr_ce_name
+         in sformat (stext % "_" % stext) phase name
+
+    metricValue (CrossEntropyPriv _ _ cntRef sumRef) = liftIO $ do
         s <- readIORef sumRef
         n <- readIORef cntRef
-        let val = s / fromIntegral n
-        return $ M.singleton (sformat (stext % "_" % stext % "_ce") phase _mtr_ce_name) val
-
-    formatMetric (CrossEntropyPriv CrossEntropy{..} _ cntRef sumRef) = liftIO $ do
-        s <- liftIO $ readIORef sumRef
-        n <- liftIO $ readIORef cntRef
-        return $ sformat ("<" % stext % "-CE" % ": " % fixed 4 % ">")
-                         _mtr_ce_name
-                         (realToFrac s / fromIntegral n :: Float)
+        return $ realToFrac s / fromIntegral n
 
 
 data ListOfMetric ms a where
@@ -189,20 +196,37 @@ data ListOfMetric ms a where
 
 instance EvalMetricMethod (ListOfMetric '[]) where
     data MetricData (ListOfMetric '[]) a = MNilData
-    newMetric _ _ = return MNilData
-    evalMetric _ _ _ = return M.empty
-    formatMetric _ = return ""
+    newMetric _ _  = return MNilData
+    metricName  _  = error "Empty metric"
+    metricValue _  = error "Empty metric"
+    metricUpdate _ _ _ = return M.empty
+    metricFormat _     = return ""
 
 instance (EvalMetricMethod m, EvalMetricMethod (ListOfMetric ms)) => EvalMetricMethod (ListOfMetric (m ': ms)) where
     data MetricData (ListOfMetric (m ': ms)) a = MCompositeData (MetricData m a) (MetricData (ListOfMetric ms) a)
     newMetric phase (a :* as) = MCompositeData <$> (newMetric phase a) <*> (newMetric phase as)
-    evalMetric (MCompositeData a as) bindings output = do
-        m1 <- evalMetric a  bindings output
-        m2 <- evalMetric as bindings output
+    metricUpdate (MCompositeData a as) bindings output = do
+        m1 <- metricUpdate a  bindings output
+        m2 <- metricUpdate as bindings output
         return $ M.union m1 m2
-    formatMetric (MCompositeData a as) = do
-        s1 <- formatMetric a
-        s2 <- formatMetric as
+    metricName _  = error "List of metrics"
+    metricValue _ = error "List of metrics"
+    metricFormat (MCompositeData a as) = do
+        s1 <- metricFormat a
+        s2 <- metricFormat as
         return $ T.concat [s1, " ", s2]
 
 infixr 9 :*
+
+class MetricsToList ms where
+    metricsToList :: (MonadIO m, FloatDType a) => MetricData (ListOfMetric ms) a -> m [(Text, Double)]
+
+instance MetricsToList '[] where
+    metricsToList MNilData = return []
+
+instance (EvalMetricMethod m, MetricsToList n) => MetricsToList (m ': n) where
+    metricsToList (MCompositeData a b) = do
+        n <- pure $ metricName a
+        v <- metricValue a
+        w <- metricsToList b
+        return $ (n, v) : w
