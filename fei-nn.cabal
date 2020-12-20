@@ -1,3 +1,4 @@
+cabal-version:              2.2
 name:                       fei-nn
 version:                    1.0.0
 synopsis:                   Train a neural network with MXNet in Haskell.
@@ -10,7 +11,6 @@ maintainer:                 jiasenwu@hotmail.com
 copyright:                  Copyright: (c) 2020 Jiasen Wu
 category:                   Machine Learning, AI
 build-type:                 Simple
-cabal-version:              1.24
 
 Flag mxnet_geq_10600 {
     Description: MXNet >= 1.6.0
