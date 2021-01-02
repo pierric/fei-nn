@@ -40,6 +40,34 @@ class EvalMetricMethod metric where
         value <- metricValue m
         return $ sformat ("<" % stext % ": " % fixed 4 % ">") name value
 
+data Loss a = Loss
+    { _mtr_loss_name     :: Maybe Text
+    , _mtr_loss_get_loss :: [NDArray a] -> NDArray a
+    }
+
+instance EvalMetricMethod Loss where
+    data MetricData Loss a = LossPriv (Loss a) Text (IORef Int) (IORef Double)
+    newMetric phase conf = liftIO $ LossPriv conf phase <$> newIORef 0 <*> newIORef 0
+
+    metricUpdate mtr@(LossPriv Loss{..} _ cntRef sumRef) bindings outputs = liftIO $ do
+        out <- toCPU $ _mtr_loss_get_loss outputs
+        value <- realToFrac . SV.sum <$> toVector out
+
+        modifyIORef sumRef (+ value)
+        modifyIORef cntRef (+ 1)
+
+        value <- metricValue mtr
+        return $ M.singleton (metricName mtr) value
+
+    metricName (LossPriv Loss{..} phase _ _) =
+        let name = fromMaybe "loss" _mtr_loss_name
+         in sformat (stext % "_" % stext) phase name
+
+    metricValue (LossPriv _ _ cntRef sumRef) = liftIO $ do
+        s <- liftIO $ readIORef sumRef
+        n <- liftIO $ readIORef cntRef
+        return $ s / fromIntegral n
+
 
 -- | Basic evaluation - accuracy
 data AccuracyPredType = PredByThreshold Float

@@ -25,6 +25,7 @@ module MXNet.NN (
     fa_extra,
     runFeiM,
 #ifdef NEPTUNE
+    Extra'Nept,
     runFeiM'nept,
     neptLog,
 #endif
