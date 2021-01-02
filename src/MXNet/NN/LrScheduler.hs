@@ -7,21 +7,24 @@ import           MXNet.Base.Spec.Operator
 import           RIO                      hiding (Const)
 
 class LrScheduler sch where
-    getLR :: sch -> Int -> Float
+    baseLR :: sch -> Float
+    getLR  :: sch -> Int -> Float
 
 instance LrScheduler Float where
     getLR = const
 
 data Const = Const Float
 instance LrScheduler Const where
-    getLR (Const lr) = const lr
+    baseLR (Const lr) = lr
+    getLR  (Const lr) = const lr
 
 lrOfConst :: Float -> Const
 lrOfConst = Const
 
 data FactorScheduler = Factor Float Float Int Float
 instance LrScheduler FactorScheduler where
-    getLR (Factor base factor step stop) nup =
+    baseLR (Factor base _ _ _) = base
+    getLR  (Factor base factor step stop) nup =
         let lr = base * factor ^ (nup `div` step)
         in if lr < stop then stop else lr
 
@@ -40,7 +43,8 @@ lrOfFactor args = Factor base factor step stop
 
 data MultifactorScheduler = Multifactor Float Float [Int]
 instance LrScheduler MultifactorScheduler where
-    getLR (Multifactor base factor steps) nup = base * factor ^ (index nup steps)
+    baseLR (Multifactor base _ _) = base
+    getLR  (Multifactor base factor steps) nup = base * factor ^ (index nup steps)
       where
         index a bs = go a bs (0 :: Int)
         go _ [] n     = n
@@ -59,7 +63,8 @@ lrOfMultifactor args = Multifactor base factor steps
 
 data PolyScheduler = Poly Float Float Int
 instance LrScheduler PolyScheduler where
-    getLR (Poly base power maxnup) nup =
+    baseLR (Poly base _ _) = base
+    getLR  (Poly base power maxnup) nup =
         if nup < maxnup
           then base * (1 - fromIntegral nup / fromIntegral maxnup) ** power
           else 0
@@ -74,3 +79,13 @@ lrOfPoly args = Poly base power maxnup
     maxnup = args ! #maxnup
     base   = fromMaybe 0.01 (args !? #base)
     power  = fromMaybe 2    (args !? #power)
+
+data WarmupScheduler a = WarmupScheduler Int a
+instance LrScheduler a => LrScheduler (WarmupScheduler a) where
+    baseLR (WarmupScheduler _ sch) = baseLR sch
+    getLR  (WarmupScheduler warmup_steps sch) nup =
+        let base = baseLR sch
+         in if nup >= warmup_steps
+            then getLR sch (nup - warmup_steps)
+            else base / fromIntegral warmup_steps * fromIntegral nup
+

@@ -4,7 +4,7 @@ version:                    1.0.0
 synopsis:                   Train a neural network with MXNet in Haskell.
 description:                High level APIs to rain a neural network with MXNet in Haskell.
 homepage:                   http://github.com/pierric/fei-nn
-license:                    BSD3
+license:                    BSD-3-Clause
 license-file:               LICENSE
 author:                     Jiasen Wu
 maintainer:                 jiasenwu@hotmail.com
@@ -93,5 +93,5 @@ Library
     }
     if flag(neptune) {
         cpp-options:        -DNEPTUNE
-        build-depends:      neptune-backend < 0.2
+        build-depends:      neptune-backend < 1
     }
