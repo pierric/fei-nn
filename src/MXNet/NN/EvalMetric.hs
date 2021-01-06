@@ -6,11 +6,13 @@
 {-# LANGUAGE TypeOperators     #-}
 module MXNet.NN.EvalMetric where
 
+import           Control.Lens
 import           Formatting                  (fixed, int, sformat, stext, (%))
-import           RIO
+import           RIO                         hiding (view)
 import qualified RIO.HashMap                 as M
 import qualified RIO.HashMap.Partial         as M ((!))
 import qualified RIO.NonEmpty                as RNE
+import           RIO.State                   (execState)
 import qualified RIO.Text                    as T
 import qualified RIO.Vector.Storable         as SV
 import qualified RIO.Vector.Storable.Partial as SV (head)
@@ -19,6 +21,42 @@ import           MXNet.Base
 import           MXNet.Base.Operators.Tensor (_norm)
 import           MXNet.NN.Layer
 import           MXNet.NN.Types
+
+-- | Keep a double value and its running mean
+data RunningValue = RunningValue
+    { _rv_accumlated :: (Int, Double)
+    , _rv_last       :: (Int, Double)
+    }
+
+makeLenses ''RunningValue
+
+-- | Create a new 'RunningValue'
+newRunningValueRef :: MonadIO m => m (IORef RunningValue)
+newRunningValueRef = liftIO $ newIORef $ RunningValue (0, 0) (0, 0)
+
+-- | Update the 'RunningValue'
+updateRunningValueRef :: MonadIO m
+                      => IORef RunningValue
+                      -> Maybe Int
+                      -> Double
+                      -> m ()
+updateRunningValueRef ref a b = liftIO $ modifyIORef ref $ execState $ do
+    let a' = fromMaybe 1 a
+    rv_accumlated . _1 += a'
+    rv_accumlated . _2 += b
+    rv_last .= (a', b)
+
+-- | Get the running mean of the value
+getRunningValueSmoothed :: MonadIO m => IORef RunningValue -> m Double
+getRunningValueSmoothed ref = liftIO $ do
+    (n, v) <- readIORef ref <&> view rv_accumlated
+    return $ v / (fromIntegral n + 1e-5)
+
+-- | Get the last value
+getRunningValueLast :: MonadIO m => IORef RunningValue -> m Double
+getRunningValueLast ref = liftIO $ do
+    (n, v) <- readIORef ref <&> view rv_last
+    return $ v / (fromIntegral n + 1e-5)
 
 -- | Abstract Evaluation type class
 class EvalMetricMethod metric where
@@ -34,40 +72,37 @@ class EvalMetricMethod metric where
                  -> m (M.HashMap Text Double)
     metricName   :: MetricData metric a -> Text
     metricValue  :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Double
+    metricValueLast :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Double
     metricFormat :: (MonadIO m, FloatDType a, HasCallStack) => MetricData metric a -> m Text
     metricFormat m = do
         name  <- pure (metricName m)
         value <- metricValue m
         return $ sformat ("<" % stext % ": " % fixed 4 % ">") name value
 
+-- | Basic metric for loss. This metric will sum up the value of the loss tensor.
 data Loss a = Loss
     { _mtr_loss_name     :: Maybe Text
     , _mtr_loss_get_loss :: [NDArray a] -> NDArray a
     }
 
 instance EvalMetricMethod Loss where
-    data MetricData Loss a = LossPriv (Loss a) Text (IORef Int) (IORef Double)
-    newMetric phase conf = liftIO $ LossPriv conf phase <$> newIORef 0 <*> newIORef 0
+    data MetricData Loss a = LossP (Loss a) Text (IORef RunningValue)
+    newMetric phase conf = LossP conf phase <$> newRunningValueRef
 
-    metricUpdate mtr@(LossPriv Loss{..} _ cntRef sumRef) bindings outputs = liftIO $ do
+    metricUpdate mtr@(LossP Loss{..} _ ref) bindings outputs = liftIO $ do
         out <- toCPU $ _mtr_loss_get_loss outputs
         value <- realToFrac . SV.sum <$> toVector out
+        updateRunningValueRef ref Nothing value
 
-        modifyIORef sumRef (+ value)
-        modifyIORef cntRef (+ 1)
+        value_smoothed <- getRunningValueSmoothed ref
+        return $ M.singleton (metricName mtr) value_smoothed
 
-        value <- metricValue mtr
-        return $ M.singleton (metricName mtr) value
-
-    metricName (LossPriv Loss{..} phase _ _) =
+    metricName (LossP Loss{..} phase _) =
         let name = fromMaybe "loss" _mtr_loss_name
          in sformat (stext % "_" % stext) phase name
 
-    metricValue (LossPriv _ _ cntRef sumRef) = liftIO $ do
-        s <- liftIO $ readIORef sumRef
-        n <- liftIO $ readIORef cntRef
-        return $ s / fromIntegral n
-
+    metricValue (LossP _ _ ref) = getRunningValueSmoothed ref
+    metricValueLast (LossP _ _ ref) = getRunningValueLast ref
 
 -- | Basic evaluation - accuracy
 data AccuracyPredType = PredByThreshold Float
@@ -82,13 +117,10 @@ data Accuracy a = Accuracy
     }
 
 instance EvalMetricMethod Accuracy where
-    data MetricData Accuracy a = AccuracyPriv (Accuracy a) Text (IORef Int) (IORef Int)
-    newMetric phase conf = do
-        a <- liftIO $ newIORef 0
-        b <- liftIO $ newIORef 0
-        return $ AccuracyPriv conf phase a b
+    data MetricData Accuracy a = AccuracyP (Accuracy a) Text (IORef RunningValue)
+    newMetric phase conf = AccuracyP conf phase <$> newRunningValueRef
 
-    metricUpdate mtr@(AccuracyPriv Accuracy{..} phase cntRef sumRef) bindings outputs = liftIO $ do
+    metricUpdate mtr@(AccuracyP Accuracy{..} phase ref) bindings outputs = liftIO $ do
         out <- toCPU $ _mtr_acc_get_prob bindings outputs
         lbl <- toCPU $ _mtr_acc_get_gt bindings outputs
 
@@ -102,20 +134,17 @@ instance EvalMetricMethod Accuracy where
         num_correct <- SV.head <$> (toVector =<< sum_ correct Nothing False)
         num_valid   <- SV.head <$> (toVector =<< sum_ valid Nothing False)
 
-        modifyIORef sumRef (+ floor num_correct)
-        modifyIORef cntRef (+ floor num_valid)
+        updateRunningValueRef ref (Just $ floor num_valid) (realToFrac num_correct)
 
-        value <- metricValue mtr
-        return $ M.singleton (metricName mtr) value
+        value_smoothed <- (100 *) <$> getRunningValueSmoothed ref
+        return $ M.singleton (metricName mtr) value_smoothed
 
-    metricName (AccuracyPriv Accuracy{..} phase _ _) =
+    metricName (AccuracyP Accuracy{..} phase _) =
         let name = fromMaybe "acc" _mtr_acc_name
          in sformat (stext % "_" % stext) phase name
 
-    metricValue (AccuracyPriv _ _ cntRef sumRef) = liftIO $ do
-        s <- liftIO $ readIORef sumRef
-        n <- liftIO $ readIORef cntRef
-        return (100 * fromIntegral s / fromIntegral n)
+    metricValue (AccuracyP _ _ ref) = (100 *) <$> getRunningValueSmoothed ref
+    metricValueLast (AccuracyP _ _ ref) = (100 *) <$> getRunningValueLast ref
 
 -- | Basic evaluation - vector norm
 data Norm a = Norm
@@ -125,34 +154,28 @@ data Norm a = Norm
     }
 
 instance EvalMetricMethod Norm where
-    data MetricData Norm a = NormPriv (Norm a) Text (IORef Int) (IORef Double)
-    newMetric phase conf = do
-        a <- liftIO $ newIORef 0
-        b <- liftIO $ newIORef 0
-        return $ NormPriv conf phase a b
+    data MetricData Norm a = NormP (Norm a) Text (IORef RunningValue)
+    newMetric phase conf = NormP conf phase <$> newRunningValueRef
 
-    metricUpdate mtr@(NormPriv Norm{..} phase cntRef sumRef) bindings preds = liftIO $ do
+    metricUpdate mtr@(NormP Norm{..} phase ref) bindings preds = liftIO $ do
         array <- toCPU $ _mtr_norm_get_array bindings preds
 
         norm <- prim _norm (#data := array .& #ord := _mtr_norm_ord .& Nil)
         norm <- SV.head <$> toVector norm
         batch_size :| _ <- ndshape array
 
-        modifyIORef' sumRef (+ realToFrac norm)
-        modifyIORef' cntRef (+ batch_size)
+        updateRunningValueRef ref (Just batch_size) (realToFrac norm)
 
-        value <- metricValue mtr
-        return $ M.singleton (metricName mtr) value
+        value_smoothed <- getRunningValueSmoothed ref
+        return $ M.singleton (metricName mtr) value_smoothed
 
-    metricName (NormPriv Norm{..} phase _ _) =
+    metricName (NormP Norm{..} phase _) =
         let lk = sformat ("_L" % int) _mtr_norm_ord
             name = fromMaybe lk _mtr_norm_name
          in sformat (stext % "_" % stext) phase name
 
-    metricValue (NormPriv _ _ cntRef sumRef) = liftIO $ do
-        s <- readIORef sumRef
-        n <- readIORef cntRef
-        return $ realToFrac s / fromIntegral n
+    metricValue (NormP _ _ ref) = getRunningValueSmoothed ref
+    metricValueLast (NormP _ _ ref) = getRunningValueLast ref
 
 -- | Basic evaluation - cross entropy
 data CrossEntropy a = CrossEntropy
@@ -163,15 +186,12 @@ data CrossEntropy a = CrossEntropy
     }
 
 instance EvalMetricMethod CrossEntropy where
-    data MetricData CrossEntropy a = CrossEntropyPriv (CrossEntropy a) Text (IORef Int) (IORef Double)
-    newMetric phase conf = do
-        a <- liftIO $ newIORef 0
-        b <- liftIO $ newIORef 0
-        return $ CrossEntropyPriv conf phase a b
+    data MetricData CrossEntropy a = CrossEntropyP (CrossEntropy a) Text (IORef RunningValue)
+    newMetric phase conf = CrossEntropyP conf phase <$> newRunningValueRef
 
-    metricUpdate mtr@(CrossEntropyPriv CrossEntropy{..} phase cntRef sumRef) bindings preds = liftIO $ do
-        prob <- toCPU $ _mtr_ce_get_prob  bindings preds
-        gt   <- toCPU $ _mtr_ce_get_gt    bindings preds
+    metricUpdate mtr@(CrossEntropyP CrossEntropy{..} phase ref) bindings preds = liftIO $ do
+        prob <- toCPU $ _mtr_ce_get_prob bindings preds
+        gt   <- toCPU $ _mtr_ce_get_gt   bindings preds
 
         (loss, num_valid) <-
             if _mtr_ce_gt_clsid
@@ -186,7 +206,7 @@ instance EvalMetricMethod CrossEntropy where
                 weights   <- geqScalar 0 gt
                 cls_prob  <- mul_ cls_prob weights
                 nloss     <- toVector =<< sum_ cls_prob Nothing False
-                num_valid <- toVector =<< sum_ weights Nothing False
+                num_valid <- toVector =<< sum_ weights  Nothing False
                 return (negate (SV.head nloss), SV.head num_valid)
             else do
                 -- when the gt are onehot vector
@@ -202,20 +222,17 @@ instance EvalMetricMethod CrossEntropy where
                 num_valid <- toVector =<< sum_ weights Nothing False
                 return (negate (SV.head nloss), SV.head num_valid)
 
-        modifyIORef' sumRef (+ realToFrac loss)
-        modifyIORef' cntRef (+ floor num_valid)
+        updateRunningValueRef ref (Just $ floor num_valid) (realToFrac loss)
 
-        value <- metricValue mtr
-        return $ M.singleton (metricName mtr) value
+        value_smoothed <- getRunningValueSmoothed ref
+        return $ M.singleton (metricName mtr) value_smoothed
 
-    metricName (CrossEntropyPriv CrossEntropy{..} phase _ _) =
+    metricName (CrossEntropyP CrossEntropy{..} phase _) =
         let name = fromMaybe "ce" _mtr_ce_name
          in sformat (stext % "_" % stext) phase name
 
-    metricValue (CrossEntropyPriv _ _ cntRef sumRef) = liftIO $ do
-        s <- readIORef sumRef
-        n <- readIORef cntRef
-        return $ realToFrac s / fromIntegral n
+    metricValue (CrossEntropyP _ _ ref) = getRunningValueSmoothed ref
+    metricValueLast (CrossEntropyP _ _ ref) = getRunningValueLast ref
 
 
 data ListOfMetric ms a where
@@ -255,6 +272,6 @@ instance MetricsToList '[] where
 instance (EvalMetricMethod m, MetricsToList n) => MetricsToList (m ': n) where
     metricsToList (MCompositeData a b) = do
         n <- pure $ metricName a
-        v <- metricValue a
+        v <- metricValueLast a
         w <- metricsToList b
         return $ (n, v) : w
