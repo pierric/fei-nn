@@ -11,6 +11,7 @@ class LrScheduler sch where
     getLR  :: sch -> Int -> Float
 
 instance LrScheduler Float where
+    baseLR = id
     getLR = const
 
 data Const = Const Float

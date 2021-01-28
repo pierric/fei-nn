@@ -1,8 +1,10 @@
-{-# LANGUAGE CPP                   #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE CPP                        #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TemplateHaskell            #-}
 module MXNet.NN (
     module MXNet.NN.Module,
     module MXNet.NN.Optimizer,
@@ -18,15 +20,14 @@ module MXNet.NN (
     module MXNet.NN.Callback,
     module MXNet.NN.DataIter.Class,
     FeiApp,
-    FeiM,
+    Feiable(..),
+    FeiMType(..),
     fa_log_func,
     fa_process_context,
     fa_session,
     fa_extra,
-    runFeiM,
 #ifdef NEPTUNE
-    Extra'Nept,
-    runFeiM'nept,
+    NeptExtra,
     neptLog,
 #endif
     initSession,
@@ -71,16 +72,14 @@ instance HasLogFunc (FeiApp t n x) where
 instance HasSessionRef (FeiApp t n x) (TaggedModuleState t n) where
     sessionRefL = fa_session
 
-type FeiM t n x a = ReaderT (FeiApp t n x) (ResourceT IO) a
+newtype SimpleFeiM t n a = SimpleFeiM (ReaderT (FeiApp t n ()) (ResourceT IO) a)
+    deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
+
+deriving instance MonadReader (FeiApp t n ()) (SimpleFeiM t n)
 
 
-data SessionAlreadyExist = SessionAlreadyExist
-    deriving (Typeable, Show)
-instance Exception SessionAlreadyExist
-
-
-runFeiM :: x -> FeiM n t x a -> IO a
-runFeiM x body = do
+runFeiMX :: x -> ReaderT (FeiApp t n x) (ResourceT IO) a -> IO a
+runFeiMX x body = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized
     -- i.e. MXNet operators are registered in the NNVM
     void mxListAllOpNames
@@ -92,23 +91,43 @@ runFeiM x body = do
         withLogFunc logopt $ \logfunc ->
             flip runReaderT (FeiApp logfunc pcontx session x) body
 
-#ifdef NEPTUNE
-type Extra'Nept x = (x, NeptuneSession, Experiment, Text -> Double -> IO ())
-runFeiM'nept :: FloatDType t
-             => Text -> x -> FeiM t n (Extra'Nept x) a -> IO a
-runFeiM'nept project x body =
-    withNept project $ \ nsess nexpt ->
-        let logger k v = nlog nexpt k (fromRational (toRational v) :: Double)
-         in runFeiM (x, nsess, nexpt, logger) body
+class Feiable (m :: * -> *) where
+    data FeiMType m a :: *
+    runFeiM :: FeiMType m a -> IO a
 
-neptLog :: Text -> Double -> FeiM t n (Extra'Nept x) ()
+data SessionAlreadyExist = SessionAlreadyExist
+    deriving (Typeable, Show)
+instance Exception SessionAlreadyExist
+
+instance Feiable (SimpleFeiM t n) where
+    data FeiMType (SimpleFeiM t n) a = Simple (SimpleFeiM t n a)
+    runFeiM (Simple (SimpleFeiM body)) = runFeiMX () body
+
+#ifdef NEPTUNE
+
+type NeptExtra = (NeptuneSession, Experiment, Text -> Double -> IO ())
+
+newtype NeptFeiM t n a = NeptFeiM (ReaderT (FeiApp t n NeptExtra) (ResourceT IO) a)
+    deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
+
+deriving instance MonadReader (FeiApp t n NeptExtra) (NeptFeiM t n)
+
+instance Feiable (NeptFeiM t n) where
+    data FeiMType (NeptFeiM t n) a = WithNept Text (NeptFeiM t n a)
+    runFeiM (WithNept project (NeptFeiM body)) = do
+        withNept project $ \ nsess nexpt ->
+            let logger k v = nlog nexpt k (fromRational (toRational v) :: Double)
+             in runFeiMX (nsess, nexpt, logger) body
+
+neptLog :: Text -> Double -> NeptFeiM t n ()
 neptLog key value = do
-    logger <- view $ fa_extra . _4
+    logger <- view $ fa_extra . _3
     liftIO $ logger key value
 
 #endif
 
-initSession :: forall n t x. FloatDType t => SymbolHandle -> Config t -> FeiM t n x ()
+initSession :: forall n t m x. (FloatDType t, Feiable m, MonadIO m, MonadReader (FeiApp t n x) m)
+            => SymbolHandle -> Config t -> m ()
 initSession sym cfg = do
     sess_ref <- view $ fa_session
     liftIO $ do
