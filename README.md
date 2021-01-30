@@ -53,8 +53,8 @@ fitAndEval :: (FloatDType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
 
 Fit the neural network, update gradients, and then evaluate and record metrics.
 
-# Writing a full training/inference app
-It is possible to write a training loop with the above `Module`. But it is still a bit verbose to connect with other code pieces such as data loading, logging/debugging. The major obstacle is that `Module` has a `StateT` monad under the hood, which rules out the the chance to be embeded into places requiring a `MonadUnliftIO`.
+# Writing a full training/inference application
+It is possible to write a training loop with the above `Module`. But it is still a bit difficult to connect with other code pieces such as data loading, logging/debugging. The major obstacle is that `Module` has a `StateT` monad under the hood, which rules out the chance to be work in places requiring a `MonadUnliftIO`.
 
 Therefore, we embed the `Module`'s state in a top-level enviornment `FeiApp`. An appplication will be written in a `ReaderT` monad, and call `askSession` when needed to "enter" the `Module` monad.
 
