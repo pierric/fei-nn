@@ -53,27 +53,43 @@ fitAndEval :: (FloatDType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
 
 Fit the neural network, update gradients, and then evaluate and record metrics.
 
-# `FeiM` Monad
-`FeiM` help to build a training/inference application. It integrates RIO's logging framework and keeps track of a
-`TaggedModuleState`.
+# Writing a full training/inference application
+It is possible to write a training loop with the above `Module`. But it is still a bit difficult to connect with other code pieces such as data loading, logging/debugging. The major obstacle is that `Module` has a `StateT` monad under the hood, which rules out the chance to work in places requiring a `MonadUnliftIO`.
 
-## `initSession`
-```
-initSession :: forall n t x. FloatDType t => SymbolHandle -> Config t -> FeiM t n x ()
-```
-a wrap-up of `initialize`.
+Therefore, we embed the `Module`'s state in a top-level enviornment `FeiApp`. An appplication will be written in a `ReaderT` monad, and call `askSession` when needed to "enter" the `Module` monad.
 
-## `runFeiM`
-```
-runFeiM :: x -> FeiM n t x a -> IO a
-```
-properly initialize mxnet before running action and some cleanups before termination.
+```haskell
+data FeiApp t n x = FeiApp
+    { _fa_log_func        :: !LogFunc
+    , _fa_process_context :: !ProcessContext
+    , _fa_session         :: MVar (TaggedModuleState t n)
+    , _fa_extra           :: x
+    }
 
-## `askSession`
+initSession :: forall n t m x. (FloatDType t, Feiable m, MonadIO m, MonadReader (FeiApp t n x) m)
+            => SymbolHandle -> Config t -> m ()
+
+askSession :: (MonadIO m, MonadReader e m, HasSessionRef e s, Session sess s)
+           => sess m r -> m r
 ```
-askSession :: Module n t (FeiM n t x) r -> FeiM n t x r
+
+There are two pre-made top-level `ReaderT` monads. The `SimpleFeiM` uses `FeiApp` without extra infomation, while `NeptFeiM` holds an extra `NeptExtra` data structure. As name suggests, `NeptFeiM` is augmented with the capability to record logs to netpune.
+
+```haskell
+newtype SimpleFeiM t n a = SimpleFeiM (ReaderT (FeiApp t n ()) (ResourceT IO) a)
+    deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
+
+newtype NeptFeiM t n a = NeptFeiM (ReaderT (FeiApp t n NeptExtra) (ResourceT IO) a)
+    deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
 ```
-helps to embed a `Module` (training/inference procedure) into `FeiM`.
+
+The type class `Feiable` is then invented to unify the common interface of `SimpleFeiM` and `NeptFeiM`, and possibility support future extension as well. `runFeiM` is supposed to properly initialize mxnet before running action and cleanup before termination.
+
+```haskell
+class Feiable (m :: * -> *) where
+    data FeiMType m a :: *
+    runFeiM :: FeiMType m a -> IO a
+```
 
 # Usage
 See the examples of [fei-examples](https://github.com/pierric/fei-examples) repository.
