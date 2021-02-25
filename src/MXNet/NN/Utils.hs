@@ -16,7 +16,7 @@ import           MXNet.Base           (Context (..), DType, NDArray (..),
                                        ndshape)
 import           MXNet.Base.Raw       (mxNDArrayLoad, mxNDArraySave,
                                        mxSymbolSaveToFile)
-import           MXNet.NN.Layer       (copy)
+import           MXNet.Base.Tensor    (copy)
 import           MXNet.NN.TaggedState (untag)
 import           MXNet.NN.Types       (Module, Parameter (..), mod_params,
                                        mod_symbol)

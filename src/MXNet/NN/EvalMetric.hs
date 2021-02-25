@@ -19,7 +19,7 @@ import qualified RIO.Vector.Storable.Partial as SV (head)
 
 import           MXNet.Base
 import           MXNet.Base.Operators.Tensor (_norm)
-import           MXNet.NN.Layer
+import           MXNet.Base.Tensor           (copy)
 import           MXNet.NN.Types
 
 -- | Keep a double value and its running mean
@@ -105,13 +105,13 @@ instance EvalMetricMethod Loss where
     metricValueLast (LossP _ _ ref) = getRunningValueLast ref
 
 -- | Basic evaluation - accuracy
-data AccuracyPredType = PredByThreshold Float
+data AccuracyPredType = PredByThreshold Double
     | PredByArgmax
     | PredByArgmaxAt Int
 data Accuracy a = Accuracy
     { _mtr_acc_name :: Maybe Text
     , _mtr_acc_type :: AccuracyPredType
-    , _mtr_acc_min_value :: Float  -- | to filter values less than min
+    , _mtr_acc_min_value :: Double -- | to filter values less than min
     , _mtr_acc_get_prob :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
     , _mtr_acc_get_gt :: M.HashMap Text (NDArray a) -> [NDArray a] -> NDArray a
     }
