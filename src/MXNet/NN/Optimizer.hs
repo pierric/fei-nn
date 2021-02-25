@@ -146,7 +146,7 @@ instance Optimizer ADAM_Opt where
                 (Just [weight])
 
 
-#ifdef MXNET_GEQ_10600
+#if MXNET_VERSION >= 10600
 
 data ADAMW_Opt dtype where
     ADAMW_Opt :: (LrScheduler sch, OptimizerCst ADAMW_Opt dtype args)

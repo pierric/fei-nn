@@ -12,9 +12,9 @@ import qualified RIO.Text                as T
 import qualified RIO.Vector.Storable     as VS
 
 import           MXNet.Base
+import           MXNet.Base.Tensor       (copy)
 import           MXNet.NN.DataIter.Class (Dataset (..), DatasetProp (..))
 import           MXNet.NN.EvalMetric     (EvalMetricMethod (..), MetricData)
-import           MXNet.NN.Layer          (copy)
 import           MXNet.NN.Optimizer      (Optimizer, optimize)
 import           MXNet.NN.Session        (withSession)
 import           MXNet.NN.TaggedState    (Tagged (..), untag)
@@ -167,7 +167,7 @@ bind symbol context params trainable = do
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
 
-adapt :: (FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
+adapt :: (HasCallStack, FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
@@ -203,7 +203,7 @@ adapt inputs = do
           Just (ParameterV dst) -> void $ copy src dst
           _                     -> return ()
 
-forwardOnly :: (FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
+forwardOnly :: (HasCallStack, FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m [NDArray dty]
 forwardOnly inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -211,7 +211,7 @@ forwardOnly inputs = do
         execForward exec False
         execGetOutputs exec
 
-fit :: (FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
+fit :: (HasCallStack, FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 fit inputs = do
     adapt inputs
     exec <- use $ untag . mod_executor
@@ -219,7 +219,7 @@ fit inputs = do
         execForward exec True
         execBackward exec []
 
-update :: (Optimizer opt, FloatDType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
+update :: (HasCallStack, Optimizer opt, FloatDType dty, MonadIO m) => opt dty -> M.HashMap Text any -> Module tag dty m ()
 update opt blacklist = do
     params <- use $ untag . mod_params
     forM_ (M.toList params) $ \case
@@ -229,7 +229,7 @@ update opt blacklist = do
     untag . mod_statistics . stat_num_upd += 1
 
 
-fitAndEval :: (FloatDType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
+fitAndEval :: (HasCallStack, FloatDType dty, Optimizer opt, EvalMetricMethod mtr, MonadIO m)
     => opt dty -> M.HashMap Text (NDArray dty) -> MetricData mtr dty -> Module tag dty m ()
 fitAndEval opt datAndLbl metric = do
     fit datAndLbl

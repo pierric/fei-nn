@@ -1,9 +1,13 @@
+{-# LANGUAGE CPP             #-}
 {-# LANGUAGE OverloadedLists #-}
 module MXNet.NN.Utils.Render where
 
+#ifdef USE_REPA
+import           Data.Array.Repa             (Array, DIM3, U, Z (..), extent,
+                                              toUnboxed, (:.) (..))
+#endif
+
 import           Codec.Picture.Types
-import           Data.Array.Repa             ((:.) (..), Array, DIM3, U, Z (..),
-                                              extent, toUnboxed)
 import qualified Graphics.Rasterific         as G
 import qualified Graphics.Rasterific.Texture as G (uniformTexture)
 import           Graphics.Text.TrueType      (Font)
@@ -53,6 +57,7 @@ imageFromNDArray array = do
       _ -> throwM $ NotConvertible shape
 
 
+#ifdef USE_REPA
 imageFromRepa :: (ColorConvertible PixelRGB8 px, HasCallStack)
               => Array U DIM3 Float -> Image px
 imageFromRepa array | c == 3 = promoted
@@ -63,4 +68,4 @@ imageFromRepa array | c == 3 = promoted
         vec = V.convert $ toUnboxed array
         image = Image w h (V.map floor vec) :: Image PixelRGB8
         promoted = promoteImage image
-
+#endif

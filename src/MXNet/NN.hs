@@ -13,7 +13,9 @@ module MXNet.NN (
     module MXNet.NN.Layer,
     module MXNet.NN.Types,
     module MXNet.NN.Utils,
+#if USE_REPA
     module MXNet.NN.Utils.Repa,
+#endif
     module MXNet.NN.Utils.GraphViz,
     module MXNet.NN.TaggedState,
     module MXNet.NN.Session,
@@ -51,7 +53,10 @@ import           MXNet.NN.TaggedState
 import           MXNet.NN.Types
 import           MXNet.NN.Utils
 import           MXNet.NN.Utils.GraphViz
+
+#ifdef CPP
 import           MXNet.NN.Utils.Repa
+#endif
 
 #ifdef NEPTUNE
 import           Neptune.Client

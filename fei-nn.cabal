@@ -17,18 +17,31 @@ Flag mxnet_geq_10600 {
     Default: False
 }
 
+Flag mxnet_geq_10700 {
+    Description: MXNet >= 1.7.0
+    Default: False
+}
+
 Flag neptune {
     Description: Integrate Neptune
     Default: False
 }
 
+Flag use_repa {
+    Description: Use Repa
+    Default: False
+}
+
 Library
+    if flag(use_repa) {
+        exposed-modules:    MXNet.NN.Utils.Repa
+        build-depends:      repa
+    }
     exposed-modules:        MXNet.NN
                             MXNet.NN.Types
                             MXNet.NN.Session
                             MXNet.NN.Utils
                             MXNet.NN.Utils.GraphViz
-                            MXNet.NN.Utils.Repa
                             MXNet.NN.Utils.Render
                             MXNet.NN.Layer
                             MXNet.NN.Optimizer
@@ -81,15 +94,17 @@ Library
                           , stm-conduit
                           , formatting
                           , wl-pprint-text
-                          , repa
                           , Rasterific
                           , JuicyPixels
                           , FontyFruity
                           , rio
                           , uuid
-                          , fei-base
+                          , fei-base >= 1.1.0
     if flag(mxnet_geq_10600) {
-        cpp-options:        -DMXNET_GEQ_10600
+        cpp-options:        -DMXNET_VERSION=10600
+    }
+    if flag(mxnet_geq_10700) {
+        cpp-options:        -DMXNET_VERSION=10700
     }
     if flag(neptune) {
         cpp-options:        -DNEPTUNE
