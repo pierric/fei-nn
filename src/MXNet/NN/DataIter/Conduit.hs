@@ -5,12 +5,14 @@ module MXNet.NN.DataIter.Conduit (
     ConduitData(..),
     Dataset(..),
     imageRecordIter_v1,
-    imageRecordIter, mnistIter, csvIter, libSVMIter
+    imageRecordIter, mnistIter, csvIter, libSVMIter,
+    forEachD_pi
 ) where
 
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as C
 import qualified Data.Conduit.List        as CL
+import           Data.Conduit.TQueue      (sinkTBQueue)
 import           RIO
 import           RIO.Prelude              (lift)
 
@@ -85,3 +87,28 @@ instance Dataset ConduitData where
 
 instance DatasetProp ConduitData a where
     batchSizeD = return . iter_batch_size
+
+forEachD_pi size (ConduitData _ conduit) proc = do
+    queue <- liftIO $ newTBQueueIO (fromIntegral size)
+    stop  <- liftIO $ newTVarIO False
+
+    let indexed  = getZipSource $ (,) <$> ZipSource (CL.sourceList [0..]) <*> ZipSource conduit
+        producer = runConduit $ indexed .| sinkTBQueue queue
+        consumer = forever $ do
+            e <- atomically $ do
+                    should_stop <- readTVar stop
+                    if should_stop
+                    then pure Nothing
+                    else do
+                        e <- tryReadTBQueue queue
+                        case e of
+                          Nothing -> retrySTM
+                          _       -> pure e
+            case e of
+              Nothing -> return ()
+              Just e  -> proc e
+    withAsyncBound consumer $ \a1 ->
+        withAsync producer  $ \a2 -> do
+            wait a2
+            atomically $ writeTVar stop True
+            wait a1

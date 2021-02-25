@@ -81,6 +81,10 @@ newtype SimpleFeiM t n a = SimpleFeiM (ReaderT (FeiApp t n ()) (ResourceT IO) a)
     deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
 
 deriving instance MonadReader (FeiApp t n ()) (SimpleFeiM t n)
+instance MonadUnliftIO (SimpleFeiM t n) where
+    withRunInIO inner = SimpleFeiM $ withRunInIO $
+                            \run -> inner $
+                                \case SimpleFeiM m -> run m
 
 
 runFeiMX :: x -> ReaderT (FeiApp t n x) (ResourceT IO) a -> IO a
@@ -116,6 +120,10 @@ newtype NeptFeiM t n a = NeptFeiM (ReaderT (FeiApp t n NeptExtra) (ResourceT IO)
     deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
 
 deriving instance MonadReader (FeiApp t n NeptExtra) (NeptFeiM t n)
+instance MonadUnliftIO (NeptFeiM t n) where
+    withRunInIO inner = NeptFeiM $ withRunInIO $
+                            \run -> inner $
+                                \case NeptFeiM m -> run m
 
 instance Feiable (NeptFeiM t n) where
     data FeiMType (NeptFeiM t n) a = WithNept Text (NeptFeiM t n a)
