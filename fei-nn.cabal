@@ -55,7 +55,6 @@ Library
                             MXNet.NN.DataIter.Vec
                             MXNet.NN.DataIter.Streaming
                             MXNet.NN.DataIter.Conduit
-                            MXNet.NN.DataIter.ConduitAsync
     other-modules:
     hs-source-dirs:         src
     ghc-options:            -Wall
