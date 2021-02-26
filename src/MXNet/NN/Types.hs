@@ -6,10 +6,7 @@ module MXNet.NN.Types where
 
 import           Control.Lens         (makeLenses)
 import qualified Data.Type.Product    as DT
-import           Data.Typeable        (Typeable)
 import           RIO
-import           RIO.HashMap          (HashMap)
-import           RIO.HashSet          (HashSet)
 import           RIO.State            (StateT)
 
 import           MXNet.Base

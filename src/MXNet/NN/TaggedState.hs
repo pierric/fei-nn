@@ -1,17 +1,17 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DataKinds, TypeOperators #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE FlexibleInstances   #-}
+{-# LANGUAGE PolyKinds           #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeOperators       #-}
 module MXNet.NN.TaggedState where
 
-import RIO
-import RIO.State (StateT(..))
-import qualified GHC.TypeLits as L
-import Data.Type.Product
-import Data.Type.Index
-import Control.Lens (makeLenses)
-import Data.Proxy (Proxy(..))
+import           Control.Lens      (makeLenses)
+import           Data.Type.Index
+import           Data.Type.Product
+import qualified GHC.TypeLits      as L
+import           RIO
+import           RIO.State         (StateT (..))
 
 newtype Tagged a (t :: L.Symbol) = Tagged {_untag :: a} deriving Show
 makeLenses ''Tagged
@@ -27,7 +27,7 @@ liftSub (StateT m1) = StateT $ \s -> do
 
 
 modify :: Index as a -> f a -> Prod f as -> Prod f as
-modify IZ new (_ :< remainder) = new :< remainder
+modify IZ new (_ :< remainder)        = new :< remainder
 modify (IS s) new (item :< remainder) = item :< modify s new remainder
 
 

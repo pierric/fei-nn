@@ -16,7 +16,6 @@ import           System.IO.Unsafe            (unsafePerformIO)
 
 import           MXNet.Base
 import qualified MXNet.Base.Operators.Tensor as S
-import qualified MXNet.NN.Types              as S
 
 runLayerBuilder :: MonadIO m => Layer a -> m a
 runLayerBuilder = liftIO . flip ST.evalStateT []

@@ -10,8 +10,6 @@ import           Control.Lens
 import           Formatting                  (fixed, int, sformat, stext, (%))
 import           RIO                         hiding (view)
 import qualified RIO.HashMap                 as M
-import qualified RIO.HashMap.Partial         as M ((!))
-import qualified RIO.NonEmpty                as RNE
 import           RIO.State                   (execState)
 import qualified RIO.Text                    as T
 import qualified RIO.Vector.Storable         as SV
@@ -19,8 +17,6 @@ import qualified RIO.Vector.Storable.Partial as SV (head)
 
 import           MXNet.Base
 import           MXNet.Base.Operators.Tensor (_norm)
-import           MXNet.Base.Tensor           (copy)
-import           MXNet.NN.Types
 
 -- | Keep a double value and its running mean
 data RunningValue = RunningValue
