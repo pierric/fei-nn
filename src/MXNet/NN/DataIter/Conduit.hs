@@ -94,7 +94,7 @@ forEachD_pi size (ConduitData _ conduit) proc = do
 
     let indexed  = getZipSource $ (,) <$> ZipSource (CL.sourceList [0..]) <*> ZipSource conduit
         producer = runConduit $ indexed .| sinkTBQueue queue
-        consumer = forever $ do
+        consumer = do
             e <- atomically $ do
                     should_stop <- readTVar stop
                     if should_stop
@@ -106,7 +106,7 @@ forEachD_pi size (ConduitData _ conduit) proc = do
                           _       -> pure e
             case e of
               Nothing -> return ()
-              Just e  -> proc e
+              Just e  -> proc e >> consumer
     withAsyncBound consumer $ \a1 ->
         withAsync producer  $ \a2 -> do
             wait a2
