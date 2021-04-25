@@ -21,11 +21,11 @@ extra-deps:
 - streaming-utils-0.1.4.7
 - graphviz-2999.20.0.4
 extra-include-dirs:
-- /home/jiasen/workspace/mxnet/build-1.7.0/include
+- /home/jiasen/workspace/mxnet/build-1.8.0/include
 extra-lib-dirs:
-- /home/jiasen/workspace/mxnet/build-1.7.0
+- /home/jiasen/workspace/mxnet/build-1.8.0
 flags:
   fei-base:
-    mxnet_geq_10700: true
+    mxnet_geq_10800: true
   fei-nn:
-    mxnet_geq_10700: true
+    mxnet_geq_10800: true
