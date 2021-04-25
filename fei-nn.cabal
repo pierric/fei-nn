@@ -22,6 +22,11 @@ Flag mxnet_geq_10700 {
     Default: False
 }
 
+Flag mxnet_geq_10800 {
+    Description: MXNet >= 1.8.0
+    Default: False
+}
+
 Flag neptune {
     Description: Integrate Neptune
     Default: False
@@ -90,6 +95,7 @@ Library
                           , streaming >= 0.1.4.5
                           , conduit >= 1.2 && < 1.4
                           , conduit-combinators >= 1.1.2 && < 1.4
+                          , constraints
                           , stm-conduit
                           , formatting
                           , wl-pprint-text
@@ -98,12 +104,16 @@ Library
                           , FontyFruity
                           , rio
                           , uuid
-                          , fei-base >= 1.1.0
+                          , type-sets
+                          , fei-base < 2.0.0
     if flag(mxnet_geq_10600) {
         cpp-options:        -DMXNET_VERSION=10600
     }
     if flag(mxnet_geq_10700) {
         cpp-options:        -DMXNET_VERSION=10700
+    }
+    if flag(mxnet_geq_10800) {
+        cpp-options:        -DMXNET_VERSION=10800
     }
     if flag(neptune) {
         cpp-options:        -DNEPTUNE
