@@ -92,6 +92,7 @@ runFeiMX x body = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized
     -- i.e. MXNet operators are registered in the NNVM
     void mxListAllOpNames
+    void $ mxSetIsNumpyShape NpyShapeGL
     logopt  <- logOptionsHandle stdout False
     pcontx  <- mkDefaultProcessContext
     session <- newEmptyMVar
@@ -139,8 +140,8 @@ neptLog key value = do
 
 #endif
 
-initSession :: forall n t m x. (FloatDType t, Feiable m, MonadIO m, MonadReader (FeiApp t n x) m)
-            => SymbolHandle -> Config t -> m ()
+initSession :: forall n t m x. (HasCallStack, FloatDType t, Feiable m, MonadIO m, MonadReader (FeiApp t n x) m)
+            => Symbol t -> Config t -> m ()
 initSession sym cfg = do
     sess_ref <- view $ fa_session
     liftIO $ do

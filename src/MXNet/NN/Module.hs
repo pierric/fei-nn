@@ -6,15 +6,15 @@ import           GHC.TypeLits            (KnownSymbol)
 import           RIO
 import qualified RIO.HashMap             as M
 import qualified RIO.HashSet             as S
-import           RIO.List                (zipWith3)
+import           RIO.List                (zip3, zipWith3)
 import qualified RIO.NonEmpty            as NE
 import qualified RIO.Text                as T
 import qualified RIO.Vector.Storable     as VS
 
 import           MXNet.Base
-import           MXNet.Base.Tensor       (copy)
 import           MXNet.NN.DataIter.Class (Dataset (..), DatasetProp (..))
 import           MXNet.NN.EvalMetric     (EvalMetricMethod (..), MetricData)
+import qualified MXNet.NN.Initializer    as I
 import           MXNet.NN.Optimizer      (Optimizer, optimize)
 import           MXNet.NN.Session        (withSession)
 import           MXNet.NN.TaggedState    (Tagged (..), untag)
@@ -23,60 +23,39 @@ import           MXNet.NN.Types
 
 data InitError = UnknownShape Text
     | ShouldNotBeScalar Text
-    | ShapeNotAgree Text (NonEmpty Int) (NonEmpty Int)
+    | ShapeNotAgree Text [Int] [Int]
     | BadShapeValue Text Text
     | BadInitValue Text Text
     deriving (Typeable, Show)
 instance Exception InitError
 
 
-initialize :: forall tag dty. (HasCallStack, FloatDType dty) => SymbolHandle -> Config dty -> IO (TaggedModuleState dty tag)
+initialize :: forall tag dty. (HasCallStack, FloatDType dty) => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
-     -- give a initial batch_size = 1 for the placeholders
-    let spec1 = M.difference input_shapes initializers
-        spec2 = initializers
-        dinit = config ^. cfg_default_initializer
+    attrs    <- listAttrs symbol
+    argnames <- listArguments symbol
+
+    let dinit = config ^. cfg_default_initializer
         cxt   = config ^. cfg_context
-        -- remove any input or label from the fixed set
-        fixed = (config ^. cfg_fixed_params) `S.difference`
-                (S.fromList $ M.keys input_shapes ++ label_names)
+        node_with_init = M.mapMaybe (M.lookup "__init__") attrs
+        no_grad = (config ^. cfg_fixed_params) `S.union`
+                  (S.fromList $ M.keys input_shapes ++ label_names)
+        fixed   = no_grad `S.difference` (S.fromList $ M.keys input_shapes ++ label_names)
+        rtypes = M.mapMaybe (M.lookup "__grad_req__" >=> parseRType) attrs `M.union`
+                 M.map (const ReqNull) (S.toMap no_grad) `M.union`
+                 M.fromList [(n, ReqWrite) | n <- argnames]
+        shapes = M.mapMaybe (M.lookup "__shape__" >=> parseShape) attrs `M.union` input_shapes
+        dtypes = M.mapMaybe (M.lookup "__dtype__" >=> parseDType) attrs
+        stypes = M.mapMaybe (M.lookup "__storage_type__" >=> parseSType) attrs
 
-    -- although it is possible to set __shape__ to certain symbols, we
-    -- don't use the information for shape inference right now.
+    (params, executor) <- simpleBind symbol cxt rtypes shapes dtypes stypes
 
-    (args, _, auxs, _) <- inferShape symbol (M.toList spec1)
-    arg_with_shp <- M.fromList <$> mapM checkTensorShape args
-    aux_with_shp <- M.fromList <$> mapM checkTensorShape auxs
-    let all_shapes = arg_with_shp `M.union` aux_with_shp
-
-    attrs <- mxSymbolListAttr symbol
-    let node_with_init = M.filter (has $ ix "__init__") attrs
-    ---------------------
-    -- important! labels should be merged into placeholders,
-    -- otherwise the labels are considered to have gradient.
-    ---------------------
-    let lbl_with_shp = M.filterWithKey (\k _ -> k `elem` label_names) arg_with_shp
-        phl_with_shp = M.map _shape_nonempty spec1 `M.union` lbl_with_shp
-    placeholders <- mapM (flip makeEmptyNDArray cxt) phl_with_shp
-
-    arg_init    <- M.traverseWithKey (initN arg_with_shp aux_with_shp fixed) node_with_init
-    arg_tensors <- M.traverseWithKey (initI placeholders fixed spec2 dinit) arg_with_shp
-    aux_tensors <- M.traverseWithKey (initA dinit) aux_with_shp
-
-    let params = arg_init `M.union` arg_tensors `M.union` aux_tensors
-    --forM (M.toList params) $ \(k, p) -> do
-    --    o <- case p of
-    --      ParameterV a -> fmap (\s -> ("V", [s])) $ ndshape a
-    --      ParameterF a -> fmap (\s -> ("F", [s])) $ ndshape a
-    --      ParameterG a b -> liftM2 (\s t -> ("V", [s, t])) (ndshape a) (ndshape b)
-    --      ParameterA a -> fmap (\s -> ("A", [s])) $ ndshape a
-    --    traceShowM ("  param", k, o)
-
-    executor <- bind symbol cxt params True
+    M.traverseWithKey (initN params) node_with_init
+    M.traverseWithKey (initD dinit initializers) params
 
     return $ Tagged $ ModuleState {
         _mod_symbol       = symbol,
-        _mod_input_shapes = phl_with_shp,
+        _mod_input_shapes = input_shapes,
         _mod_params       = params,
         _mod_context      = cxt,
         _mod_executor     = executor,
@@ -92,61 +71,60 @@ initialize symbol config = do
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
     -- other input symbols are initialized by an initializer.
-    initI placeholders fixed spec2 dinit inp shp = do
-        case M.lookup inp placeholders of
-            Just in_arg -> do
-                return $ ParameterV in_arg
-            Nothing -> do
-                arg_in <- case M.lookup inp spec2 of
-                    Just cinit -> cinit inp shp context
-                    Nothing    -> dinit inp shp context
-                if S.member inp fixed
-                    then return $ ParameterF arg_in
-                    else do
-                        arg_gr <- makeEmptyNDArray shp context
-                        return $ ParameterG arg_in arg_gr
-    -- initialize auxiliary symbols.
-    initA dinit aux shp = do
-        arg_aux <- dinit aux shp context
-        return $ ParameterA arg_aux
+
+    initD dinit cinit name param = do
+        let init_op = case M.lookup name cinit of
+                        Just x  -> x
+                        Nothing -> dinit
+
+        case param of
+          ParameterG a g -> init_op name a >> I.zeros name g
+          ParameterA a   -> dinit name a
+          _              -> return ()
 
     -- initialize symbol with __init__ attribute
-    initN args auxs fixed name attrs = do
-        let shp1 = M.lookup name (M.union args auxs)
-            shp2 = M.lookup "__shape__" attrs
+    initN :: DType a => HashMap Text (Parameter a) -> Text -> Text -> IO ()
+    initN params name init_value = do
+        let do_init a = case T.unpack init_value of
+                          "[\"zero\", {}]" -> I.zeros name a
+                          "[\"one\", {}]"  -> I.ones name a
+                          v -> case readMaybe v :: Maybe Float of
+                                 Just v  -> I.constant v name a
+                                 _ -> case readMaybe v of
+                                        Just v  -> I.vector (VS.fromList v) name a
+                                        Nothing -> throwM $ BadInitValue name init_value
+         in case M.lookup name params of
+              Nothing -> let msg = sformat ("'" % stext % "' is not in param list, but has __init__ defined?") name
+                          in error $ T.unpack msg
+              Just (ParameterV a) -> do_init a
+              Just (ParameterA a) -> do_init a
+              _ ->  error $ T.unpack name ++ " has an __init__ property, " ++
+                            "but it is neither a variable nor an auxiliary state."
 
-        shp2 <- case shp2 of
-                  Nothing -> pure Nothing
-                  Just s -> case readMaybe (T.unpack s) >>= NE.nonEmpty of
-                      Nothing -> throwM $ BadShapeValue name s
-                      t       -> pure t
+    parseShape :: Text -> Maybe [Int]
+    parseShape = readMaybe . T.unpack
 
-        shape <- case (shp1, shp2) of
-          (Nothing, Nothing) -> throwM $ UnknownShape name
-          (Just shp1, Just shp2) | shp1 /= shp2 -> throwM $ ShapeNotAgree name shp1 shp2
-          (Just shp1, _) -> pure shp1
-          (_, Just shp2) -> pure shp2
+    parseRType :: Text -> Maybe ReqType
+    parseRType "null"    = Just ReqNull
+    parseRType "write"   = Just ReqWrite
+    parseRType "add"     = Just ReqAdd
+    parseRType "inplace" = Just ReqInplace
+    parseRType _         = Nothing
 
-        let value_text = attrs ^. ix "__init__"
-        array <- case T.unpack value_text of
-                   "[\"zero\", {}]" -> zeros shape >>= flip toContext context
-                   "[\"one\", {}]"  -> ones  shape >>= flip toContext context
-                   v -> case readMaybe v of
-                          Nothing -> throwM $ BadInitValue name value_text
-                          Just v  -> makeNDArray shape context $ VS.fromList v
+    parseDType :: Text -> Maybe Int
+    parseDType "float32" = Just 0
+    parseDType "float64" = Just 1
+    parseDType "uint8"   = Just 3
+    parseDType "int32"   = Just 4
+    parseDType "int64"   = Just 6
+    parseDType _         = Nothing
 
-        case (S.member name fixed, M.member name args, M.member name auxs) of
-          (True, _, _) -> return $ ParameterF array
-          (False, False, True) -> return $ ParameterA array
-          (False, True, False) -> do
-              grad <- makeEmptyNDArray shape context
-              return $ ParameterG array grad
+    parseSType :: Text -> Maybe Int
+    parseSType "default" = Just 0
+    parseSType _         = Nothing
 
-    checkTensorShape (name, SScalar)   = throwIO $ ShouldNotBeScalar name
-    checkTensorShape (name, STensor s) = return (name, s)
-
-
-bind :: (HasCallStack, FloatDType dty) => SymbolHandle -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
+bind :: (HasCallStack, FloatDType dty)
+     => Symbol dty -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
     argnames <- listArguments symbol
     auxnames <- listAuxiliaryStates symbol
@@ -157,15 +135,32 @@ bind symbol context params trainable = do
         arg_all  = map ((params ^?!) . ix) argnames
         arg_in   = map (\case {
                     ParameterV t -> t;
-                    ParameterF t -> t;
                     ParameterG t _ -> t;
                     ParameterA _ -> error "auxiliary parameter shouldn't occur"
                     }) arg_all
-        arg_gr_w_req = if trainable then map (\case {ParameterG _ t -> Just (t, 1); _ -> Nothing}) arg_all
+        arg_gr_w_req = if trainable then map (\case {ParameterG _ t -> Just (t, ReqWrite); _ -> Nothing}) arg_all
                                     else replicate num_args Nothing
         aux_arg_aux  = map (_param_aux . (params ^?!) . ix) auxnames
     execBind symbol context arg_in arg_gr_w_req aux_arg_aux
 
+simpleBind :: (HasCallStack, FloatDType dty)
+           => Symbol dty
+           -> Context
+           -> HashMap Text ReqType
+           -> HashMap Text Shape
+           -> HashMap Text Int
+           -> HashMap Text Int
+           -> IO (M.HashMap Text (Parameter dty), Executor dty)
+simpleBind symbol context rtypes shapes dtypes stypes = do
+    argnames <- listArguments symbol
+    auxnames <- listAuxiliaryStates symbol
+    (args, grads, auxs, exec) <- execSimpleBind symbol context rtypes shapes dtypes stypes
+
+    let build1 n a Nothing  = traceShow ("V", n) (n, ParameterV a)
+        build1 n a (Just g) = traceShow ("G", n) (n, ParameterG a g)
+        param1 = zipWith3 build1 argnames args grads
+        param2 = zipWith (\n a -> (n, ParameterA a)) auxnames auxs
+    return $ (M.fromList $ param1 ++ param2, exec)
 
 adapt :: (HasCallStack, FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 adapt inputs = do
@@ -178,11 +173,14 @@ adapt inputs = do
 
     -- reshape the executor (and arg, aux arrays)
     when (shapes /= shapes') $ do
-        (args, grads, auxs, exec) <- liftIO $ execReshapeEx exec True True context (M.toList shapes')
+        (args, grads, auxs, exec) <- liftIO $ do
+            void $ mxSetIsNumpyShape NpyShapeOff
+            ret <- execReshapeEx exec True True context (M.toList shapes')
+            void $ mxSetIsNumpyShape NpyShapeGL
+            return ret
         arg_names <- liftIO $ listArguments symbol
         aux_names <- liftIO $ listAuxiliaryStates symbol
-        let buildArg key a Nothing  | S.member key fixed = (key, ParameterF a)
-            buildArg key a Nothing  | otherwise = (key, ParameterV a)
+        let buildArg key a Nothing  = (key, ParameterV a)
             buildArg key a (Just b) = (key, ParameterG a b)
             buildAux key a = (key, ParameterA a)
             arg_ndarrs = M.fromList $ zipWith3 buildArg arg_names args grads

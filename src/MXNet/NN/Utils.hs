@@ -8,12 +8,11 @@ import           RIO
 import           RIO.Directory        (getModificationTime, listDirectory)
 import           RIO.FilePath         (dropExtension, (</>))
 import qualified RIO.HashMap          as M
-import           RIO.List             (lastMaybe, sortOn)
-import qualified RIO.NonEmpty         as RNE
+import           RIO.List             (intersperse, lastMaybe, sortOn)
 import qualified RIO.Text             as T
 
 import           MXNet.Base           (Context (..), DType, NDArray (..),
-                                       ndshape)
+                                       Symbol (..), ndshape)
 import           MXNet.Base.Raw       (mxNDArrayLoad, mxNDArraySave,
                                        mxSymbolSaveToFile)
 import           MXNet.Base.Tensor    (copy)
@@ -22,9 +21,9 @@ import           MXNet.NN.Types       (Module, Parameter (..), mod_params,
                                        mod_symbol)
 
 -- | format a shape
-formatShape :: NonEmpty Int -> Text
-formatShape shape = let sshape = RNE.intersperse "," (RNE.map tshow shape)
-                    in T.concat $ ["("] ++ RNE.toList sshape ++ [")"]
+formatShape :: [Int] -> Text
+formatShape shape = let sshape = intersperse "," (map tshow shape)
+                    in T.concat $ ["("] ++ sshape ++ [")"]
 
 -- | format a context
 formatContext :: Context -> Text
@@ -63,11 +62,11 @@ saveState save_symbol name = do
     symbol <- use (untag . mod_symbol)
     let modelParams = concatMap getModelParam $ M.toList params
     liftIO $ do
-        when save_symbol $ mxSymbolSaveToFile (T.pack $ name ++ ".json") symbol
+        when save_symbol $
+            mxSymbolSaveToFile (T.pack $ name ++ ".json") $ unSymbol symbol
         mxNDArraySave (T.pack $ name ++ ".params") modelParams
   where
-    getModelParam (_,   ParameterV _)   = []
-    getModelParam (key, ParameterF a)   = [(key, unNDArray a)]
+    getModelParam (key, ParameterV a)   = [(key, unNDArray a)]
     getModelParam (key, ParameterA a)   = [(key, unNDArray a)]
     getModelParam (key, ParameterG a g) =
         [(key, unNDArray a), (key `T.append` "__grad", unNDArray g)]
@@ -90,23 +89,22 @@ loadState weights_filename ignores = do
                     ("Tensor " % stext % " is ignored as missing in the model.") name
             (_, Nothing, Just name', Just (ParameterG _ target)) -> do
                 checkShape name' (NDArray hdl) target
-                liftIO $ void $ copy hdl (unNDArray target)
+                liftIO $ void $ copy (NDArray hdl) target
             (_, Nothing, Just name', Just _) -> do
                 -- we silently ignore any missing grad,
                 -- for it is too common if we load the model for inference
                 return ()
-            (_, Just (ParameterV _), _, _) ->
-                logWarn . display $ sformat
-                    ("Tensor " % stext % " is ignored as a variable in the model.") name
+            (_, Just (ParameterV target), _, _) -> do
+                -- we load weights for variables (tensor w/o grad) too
+                -- because fixed tensor is treated as variable.
+                checkShape name (NDArray hdl) target
+                liftIO $ void $ copy (NDArray hdl) target
             (_, Just (ParameterG target _), _, _) -> do
                 checkShape name (NDArray hdl) target
-                liftIO $ void $ copy hdl (unNDArray target)
-            (_, Just (ParameterF target), _, _)   -> do
-                checkShape name (NDArray hdl) target
-                liftIO $ void $ copy hdl (unNDArray target)
+                liftIO $ void $ copy (NDArray hdl) target
             (_, Just (ParameterA target), _, _)   -> do
                 checkShape name (NDArray hdl) target
-                liftIO $ void $ copy hdl (unNDArray target)
+                liftIO $ void $ copy (NDArray hdl) target
     where
         checkShape :: (MonadReader env m, HasLogFunc env, MonadIO m, DType a)
                    => Text -> NDArray a -> NDArray a -> m ()

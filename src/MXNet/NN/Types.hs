@@ -23,7 +23,7 @@ import           MXNet.NN.TaggedState (Tagged)
 -- Note that any symbol not specified will be initialized with the
 -- _cfg_default_initializer.
 data Config a = Config
-    { _cfg_data                :: HashMap Text FShape
+    { _cfg_data                :: HashMap Text Shape
     , _cfg_label               :: [Text]
     , _cfg_initializers        :: HashMap Text (Initializer a)
     , _cfg_default_initializer :: Initializer a
@@ -35,11 +35,11 @@ data Config a = Config
 --
 -- Usually, it can be a wrapper of MXNet operators, such as @random_uniform@, @random_normal@,
 -- @random_gamma@, etc..
-type Initializer a = Text -> NonEmpty Int -> Context -> IO (NDArray a)
+type Initializer a = Text -> NDArray a -> IO ()
 
 -- | Possible exception in 'TrainM'
-data Exc = MismatchedShapeOfSym Text (NonEmpty Int) (NonEmpty Int)
-    | MismatchedShapeInEval (NonEmpty Int) (NonEmpty Int)
+data Exc = MismatchedShapeOfSym Text [Int] [Int]
+    | MismatchedShapeInEval [Int] [Int]
     | NotAParameter Text
     | InvalidArgument Text
     | InferredShapeInComplete
@@ -54,8 +54,8 @@ type Module tag dty = StateT (TaggedModuleState dty tag)
 type ModuleSet tags dty = StateT (DT.Prod (TaggedModuleState dty) tags)
 
 data ModuleState a = ModuleState
-    { _mod_symbol       :: SymbolHandle
-    , _mod_input_shapes :: HashMap Text (NonEmpty Int)
+    { _mod_symbol       :: Symbol a
+    , _mod_input_shapes :: HashMap Text [Int]
     , _mod_params       :: HashMap Text (Parameter a)
     , _mod_context      :: Context
     , _mod_executor     :: Executor a
@@ -67,9 +67,6 @@ data ModuleState a = ModuleState
 -- | A parameter is two 'NDArray' to back a 'Symbol'
 data Parameter a = ParameterV
     { _param_var :: NDArray a
-    }
-    | ParameterF
-    { _param_arg :: NDArray a
     }
     | ParameterG
     { _param_arg  :: NDArray a

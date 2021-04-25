@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE PartialTypeSignatures  #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE UndecidableInstances   #-}
 module MXNet.NN.Layer where
@@ -8,6 +9,7 @@ import qualified Data.UUID                   as UUID
 import qualified Data.UUID.V4                as UUID
 import           Formatting                  (formatToString, int, shown, stext,
                                               (%))
+import           GHC.TypeLits                (KnownSymbol, symbolVal)
 import           RIO
 import qualified RIO.NonEmpty                as NE
 import qualified RIO.State                   as ST
@@ -20,9 +22,9 @@ import qualified MXNet.Base.Operators.Tensor as S
 runLayerBuilder :: MonadIO m => Layer a -> m a
 runLayerBuilder = liftIO . flip ST.evalStateT []
 
-type instance TensorMonad SymbolHandle  = Layer
+type instance TensorMonad Symbol = Layer
 
-instance PrimTensorOp SymbolHandle SymbolHandle where
+instance PrimTensorOp Symbol where
     prim      op args = getNextNamePrefixed >>= liftIO . op args
     primMulti op args = do
         out <- prim op args
@@ -149,28 +151,55 @@ subscope_next_name mk = do
     subscope_named name mk
 
 
-variable :: Text -> Layer SymbolHandle
-variable name = getNamePrefixed (Just name) >>= liftIO . mxSymbolCreateVariable
+parameter :: forall a. (DType a, KnownSymbol (DTypeName a))
+          => Text -> ReqType -> Layer (Symbol a)
+parameter name grad_req = do
+    pn <- getNamePrefixed (Just name)
+    liftIO $ do
+        sym <- mxSymbolCreateVariable pn
+        let dtype = RT.pack $ symbolVal $ (Proxy :: Proxy (DTypeName a))
+        setAttr sym "__dtype__" dtype
+        setAttr sym "__storage_type__" "default"
+        setAttr sym "__grad_req__" rtype
+        return $ Symbol sym
+    where
+        rtype = case grad_req of
+                  ReqNull    -> "null"
+                  ReqWrite   -> "write"
+                  ReqAdd     -> "add"
+                  ReqInplace -> "inplace"
 
-constant :: NonEmpty Int -> [Float] -> Layer SymbolHandle
+variable :: (DType a, KnownSymbol (DTypeName a))
+          => Text -> Layer (Symbol a)
+variable = flip parameter ReqNull
+
+
+constant :: forall a. (DType a, KnownSymbol (DTypeName a))
+         => NonEmpty Int -> [Float] -> Layer (Symbol a)
 constant shape value = do
     name <- getNextNamePrefixed
-    let build = do var <- mxSymbolCreateVariable name
-                   mxSymbolSetAttr var "__shape__" (tshow $ NE.toList shape)
-                   mxSymbolSetAttr var "__init__"  (tshow value)
-                   return var
-    named (RT.concat [name, ".sg"]) $ blockGrad =<< liftIO build
+    sym  <- liftIO $ do
+                var <- mxSymbolCreateVariable name
+                let dtype = RT.pack $ symbolVal $ (Proxy :: Proxy (DTypeName a))
+                setAttr var "__shape__" (tshow $ NE.toList shape)
+                setAttr var "__init__"  (tshow value)
+                setAttr var "__dtype__" dtype
+                setAttr var "__storage_type__" "default"
+                setAttr var "__grad_req__" "null"
+                return $ Symbol var
+    named (RT.concat [name, ".sg"]) $ blockGrad sym
 
-convolution :: (HasArgs "_Convolution" SymbolHandle args
+convolution :: (HasArgs "_Convolution" '(Symbol, a) args
                     '["kernel", "num_filter", "data", "stride", "dilate", "pad",
                       "num_group", "workspace", "layout",
                       "cudnn_tune", "cudnn_off", "no_bias"]
-               ,WithoutArgs "_Convolution" SymbolHandle args
-                    '["bias", "weight"])
-            => ArgsHMap "_Convolution" _ args -> Layer SymbolHandle
+               ,WithoutArgs "_Convolution" '(Symbol, a) args
+                    '["bias", "weight"]
+               ,DType a)
+            => ArgsHMap "_Convolution" _ args -> Layer (Symbol a)
 convolution args = subscope_next_name $ do
-    b <- variable "bias"
-    w <- variable "weight"
+    b <- parameter "bias"   ReqWrite
+    w <- parameter "weight" ReqWrite
 
     name <- getNamePrefixed Nothing
     if args !? #no_bias == Just True
@@ -179,16 +208,17 @@ convolution args = subscope_next_name $ do
       else
         liftIO $ S._Convolution (#bias := b .& #weight := w .& args) name
 
-convolutionShared :: (HasArgs "_Convolution" SymbolHandle args
+convolutionShared :: (HasArgs "_Convolution" '(Symbol, a) args
                         '["kernel", "num_filter", "stride",
                           "dilate", "pad", "num_group", "workspace",
                           "layout", "cudnn_tune", "cudnn_off", "no_bias"]
-                     ,WithoutArgs "_Convolution" SymbolHandle args
-                        '["data", "bias", "weight"])
-                  => ArgsHMap "_Convolution" _ args -> Layer (SymbolHandle -> Layer SymbolHandle)
+                     ,WithoutArgs "_Convolution" '(Symbol, a) args
+                        '["data", "bias", "weight"]
+                     ,DType a)
+                  => ArgsHMap "_Convolution" _ args -> Layer (Symbol a -> Layer (Symbol a))
 convolutionShared args = subscope_next_name $ do
-    b <- variable "bias"
-    w <- variable "weight"
+    b <- parameter "bias"   ReqWrite
+    w <- parameter "weight" ReqWrite
 
     return $ \data_ -> do
         name <- getNextNamePrefixed
@@ -198,14 +228,15 @@ convolutionShared args = subscope_next_name $ do
           else
             liftIO $ S._Convolution (#data := data_ .& #bias := b .& #weight := w .& args) name
 
-fullyConnected :: (HasArgs "_FullyConnected" SymbolHandle args
+fullyConnected :: (HasArgs "_FullyConnected" '(Symbol, a) args
                     '["flatten", "no_bias", "data", "num_hidden"]
-                  ,WithoutArgs "_FullyConnected" SymbolHandle args
-                    '["bias", "weight"])
-              => ArgsHMap "_FullyConnected" _ args -> Layer SymbolHandle
+                  ,WithoutArgs "_FullyConnected" '(Symbol, a) args
+                    '["bias", "weight"]
+                  ,DType a)
+              => ArgsHMap "_FullyConnected" _ args -> Layer (Symbol a)
 fullyConnected args = subscope_next_name $ do
-    b <- variable "bias"
-    w <- variable "weight"
+    b <- parameter "bias"   ReqWrite
+    w <- parameter "weight" ReqWrite
 
     name <- getNamePrefixed Nothing
     if args !? #no_bias == Just True
@@ -214,14 +245,16 @@ fullyConnected args = subscope_next_name $ do
     else
         liftIO $ S._FullyConnected (#bias := b .& #weight := w .& args) name
 
-fullyConnectedShared :: (HasArgs "_FullyConnected" SymbolHandle args
+fullyConnectedShared :: (HasArgs "_FullyConnected" '(Symbol, a) args
                             '["flatten", "no_bias", "num_hidden"]
-                        ,WithoutArgs "_FullyConnected" SymbolHandle args
-                            '["bias", "weight"])
-                     => ArgsHMap "_FullyConnected" _ args -> Layer (SymbolHandle -> Layer SymbolHandle)
+                        ,WithoutArgs "_FullyConnected" '(Symbol, a) args
+                            '["bias", "weight"]
+                        ,DType a)
+                     => ArgsHMap "_FullyConnected" _ args
+                     -> Layer (Symbol a -> Layer (Symbol a))
 fullyConnectedShared args = subscope_next_name $ do
-    b <- variable "bias"
-    w <- variable "weight"
+    b <- parameter "bias"   ReqWrite
+    w <- parameter "weight" ReqWrite
 
     return $ \data_ -> do
         name <- getNextNamePrefixed
@@ -231,16 +264,17 @@ fullyConnectedShared args = subscope_next_name $ do
         else
             liftIO $ S._FullyConnected (#data := data_ .& #bias := b .& #weight := w .& args) name
 
-batchnorm :: HasArgs "_BatchNorm" SymbolHandle  args
+batchnorm :: (HasArgs "_BatchNorm" '(Symbol, a) args
                 '["data", "eps", "momentum", "fix_gamma",
                   "use_global_stats", "output_mean_var", "axis",
                   "cudnn_off", "min_calib_range", "max_calib_range"]
-          => ArgsHMap "_BatchNorm" _ args -> Layer SymbolHandle
+             ,DType a)
+          => ArgsHMap "_BatchNorm" _ args -> Layer (Symbol a)
 batchnorm args = subscope_next_name $ do
-    gamma    <- variable "gamma"
-    beta     <- variable "beta"
-    mov_mean <- variable "running_mean"
-    mov_var  <- variable "running_var"
+    gamma    <- parameter "gamma"        ReqWrite
+    beta     <- parameter "beta"         ReqWrite
+    mov_mean <- parameter "running_mean" ReqNull
+    mov_var  <- parameter "running_var"  ReqNull
 
     name <- getNamePrefixed Nothing
     liftIO $ S._BatchNorm (#gamma := gamma
@@ -249,6 +283,11 @@ batchnorm args = subscope_next_name $ do
                         .& #moving_var := mov_var
                         .& args) name
 
-blockGrad :: SymbolHandle -> Layer SymbolHandle
+blockGrad :: DType a => Symbol a -> Layer (Symbol a)
 blockGrad s = prim S._BlockGrad (#data := s .& Nil)
 
+-- |
+-- Note that: MakeLoss is compatible with numpy semantics. It is necessary to reshape
+-- the loss to be (1,) if it is a scalar.
+makeLoss :: DType a => Symbol a -> Float -> Layer (Symbol a)
+makeLoss s a = prim S._MakeLoss (#data := s .& #grad_scale := a .& Nil)

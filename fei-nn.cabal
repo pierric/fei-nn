@@ -105,7 +105,7 @@ Library
                           , rio
                           , uuid
                           , type-sets
-                          , fei-base < 2.0.0
+                          , fei-base >= 2.0.0
     if flag(mxnet_geq_10600) {
         cpp-options:        -DMXNET_VERSION=10600
     }
