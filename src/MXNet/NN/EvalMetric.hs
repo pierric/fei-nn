@@ -1,15 +1,19 @@
-{-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RecordWildCards   #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE FlexibleInstances   #-}
+{-# LANGUAGE InstanceSigs        #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeOperators       #-}
 module MXNet.NN.EvalMetric where
 
 import           Control.Lens
+import           Data.Constraint
 import           Formatting                  (fixed, int, sformat, stext, (%))
 import           RIO                         hiding (view)
 import qualified RIO.HashMap                 as M
+import           RIO.List                    (headMaybe)
 import           RIO.State                   (execState)
 import qualified RIO.Text                    as T
 import qualified RIO.Vector.Storable         as SV
@@ -61,7 +65,7 @@ class EvalMetricMethod metric where
               => Text                          -- phase name
               -> metric a                      -- tag
               -> m (MetricData metric a)
-    metricUpdate :: (MonadIO m, FloatDType a, HasCallStack)
+    metricUpdate :: forall a m . (MonadIO m, FloatDType a, HasCallStack)
                  => MetricData metric a           -- evaluation metric
                  -> M.HashMap Text (NDArray a)    -- network bindings
                  -> [NDArray a]                   -- output of the network
@@ -116,18 +120,24 @@ instance EvalMetricMethod Accuracy where
     data MetricData Accuracy a = AccuracyP (Accuracy a) Text (IORef RunningValue)
     newMetric phase conf = AccuracyP conf phase <$> newRunningValueRef
 
+    metricUpdate :: forall a m . (MonadIO m, FloatDType a, HasCallStack)
+                 => MetricData Accuracy a
+                 -> M.HashMap Text (NDArray a)
+                 -> [NDArray a]
+                 -> m (M.HashMap Text Double)
     metricUpdate mtr@(AccuracyP Accuracy{..} phase ref) bindings outputs = liftIO $ do
         out <- toCPU $ _mtr_acc_get_prob bindings outputs
         lbl <- toCPU $ _mtr_acc_get_gt bindings outputs
 
         out <- case _mtr_acc_type of
-          PredByThreshold thr -> geqScalar thr out
-          PredByArgmax        -> argmax out (Just (-1))False
-          PredByArgmaxAt axis -> argmax out (Just axis) False
+                 PredByThreshold thr -> geqScalar thr out >>= castToFloat @(DTypeName a)
+                 PredByArgmax        -> argmax out (Just (-1))False  >>= castToFloat @(DTypeName a)
+                 PredByArgmaxAt axis -> argmax out (Just axis) False >>= castToFloat @(DTypeName a)
 
         valid   <- geqScalar _mtr_acc_min_value lbl
-        correct <- and_ valid =<< eq_ out lbl
+        correct <- eq_ out lbl >>= and_ valid >>= castToFloat @(DTypeName a)
         num_correct <- SV.head <$> (toVector =<< sum_ correct Nothing False)
+        valid   <- castToFloat @(DTypeName a) valid
         num_valid   <- SV.head <$> (toVector =<< sum_ valid Nothing False)
 
         updateRunningValueRef ref (Just $ floor num_valid) (realToFrac num_correct)
@@ -155,15 +165,17 @@ instance EvalMetricMethod Norm where
 
     metricUpdate mtr@(NormP Norm{..} phase ref) bindings preds = liftIO $ do
         array <- toCPU $ _mtr_norm_get_array bindings preds
+        shape <- ndshape array
 
-        norm <- prim _norm (#data := array .& #ord := _mtr_norm_ord .& Nil)
-        norm <- SV.head <$> toVector norm
-        batch_size :| _ <- ndshape array
+        case headMaybe shape of
+          Nothing -> throwString (T.unpack (metricName mtr) ++ " is scalar.")
+          Just batch_size -> do
+              norm  <- prim _norm (#data := array .& #ord := _mtr_norm_ord .& Nil)
+              norm  <- SV.head <$> toVector norm
+              updateRunningValueRef ref (Just batch_size) (realToFrac norm)
 
-        updateRunningValueRef ref (Just batch_size) (realToFrac norm)
-
-        value_smoothed <- getRunningValueSmoothed ref
-        return $ M.singleton (metricName mtr) value_smoothed
+              value_smoothed <- getRunningValueSmoothed ref
+              return $ M.singleton (metricName mtr) value_smoothed
 
     metricName (NormP Norm{..} phase _) =
         let lk = sformat ("_L" % int) _mtr_norm_ord
@@ -185,38 +197,43 @@ instance EvalMetricMethod CrossEntropy where
     data MetricData CrossEntropy a = CrossEntropyP (CrossEntropy a) Text (IORef RunningValue)
     newMetric phase conf = CrossEntropyP conf phase <$> newRunningValueRef
 
+    metricUpdate :: forall a m . (MonadIO m, FloatDType a, HasCallStack)
+                 => MetricData CrossEntropy a
+                 -> M.HashMap Text (NDArray a)
+                 -> [NDArray a]
+                 -> m (M.HashMap Text Double)
     metricUpdate mtr@(CrossEntropyP CrossEntropy{..} phase ref) bindings preds = liftIO $ do
         prob <- toCPU $ _mtr_ce_get_prob bindings preds
         gt   <- toCPU $ _mtr_ce_get_gt   bindings preds
 
         (loss, num_valid) <-
-            if _mtr_ce_gt_clsid
-            then do
-                -- when the gt labels are class id,
-                --  prob: (a, ..., b, num_classes)
-                --  gt: (a,..,b)
-                -- dim(prob) = dim(gt) + 1
-                -- The last dimension serves as the prob dist.
-                -- We pickup the prob at the label specified class.
-                cls_prob  <- log2_ =<< addScalar 1e-5 =<< pickI gt prob
-                weights   <- geqScalar 0 gt
-                cls_prob  <- mul_ cls_prob weights
-                nloss     <- toVector =<< sum_ cls_prob Nothing False
-                num_valid <- toVector =<< sum_ weights  Nothing False
-                return (negate (SV.head nloss), SV.head num_valid)
-            else do
-                -- when the gt are onehot vector
-                --   prob: (a, .., b, num_classes)
-                --   gt:   (a, .., b, num_classes)
-                -- dim(prob) == dim(gt)
-                term1     <- mul_ gt =<< log2_ =<< addScalar 1e-5 prob
-                a         <- log2_   =<< addScalar 1e-5 =<< rsubScalar 1 prob
-                term2     <- mul_ a  =<< rsubScalar 1 gt
-                weights   <- geqScalar 0 gt
-                nloss     <- mul_ weights =<< add_ term1 term2
-                nloss     <- toVector =<< sum_ nloss Nothing False
-                num_valid <- toVector =<< sum_ weights Nothing False
-                return (negate (SV.head nloss), SV.head num_valid)
+                if _mtr_ce_gt_clsid
+                then do
+                    -- when the gt labels are class id,
+                    --  prob: (a, ..., b, num_classes)
+                    --  gt: (a,..,b)
+                    -- dim(prob) = dim(gt) + 1
+                    -- The last dimension serves as the prob dist.
+                    -- We pickup the prob at the label specified class.
+                    cls_prob  <- log2_ =<< addScalar 1e-5 =<< pick (Just (-1)) gt prob
+                    weights   <- geqScalar 0 gt >>= castToFloat @(DTypeName a)
+                    cls_prob  <- mul_ cls_prob weights
+                    nloss     <- toVector =<< sum_ cls_prob Nothing False
+                    num_valid <- toVector =<< sum_ weights  Nothing False
+                    return (negate (SV.head nloss), SV.head num_valid)
+                else do
+                    -- when the gt are onehot vector
+                    --   prob: (a, .., b, num_classes)
+                    --   gt:   (a, .., b, num_classes)
+                    -- dim(prob) == dim(gt)
+                    term1     <- mul_ gt =<< log2_ =<< addScalar 1e-5 prob
+                    a         <- log2_   =<< addScalar 1e-5 =<< rsubScalar 1 prob
+                    term2     <- mul_ a  =<< rsubScalar 1 gt
+                    weights   <- geqScalar 0 gt >>= castToFloat @(DTypeName a)
+                    nloss     <- mul_ weights =<< add_ term1 term2
+                    nloss     <- toVector =<< sum_ nloss Nothing False
+                    num_valid <- toVector =<< sum_ weights Nothing False
+                    return (negate (SV.head nloss), SV.head num_valid)
 
         updateRunningValueRef ref (Just $ floor num_valid) (realToFrac loss)
 

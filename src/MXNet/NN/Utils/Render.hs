@@ -40,7 +40,7 @@ drawBox color stroke_width x0 y0 x1 y1 label = do
                in G.printTextAt font (G.PointSize size) (G.V2 (x0+2) (y0+size+2)) text_str
 
 
-data NotConvertible = NotConvertible (NonEmpty Int)
+data NotConvertible = NotConvertible [Int]
     deriving Show
 instance Exception NotConvertible
 

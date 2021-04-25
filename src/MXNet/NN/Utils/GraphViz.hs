@@ -11,7 +11,6 @@ import qualified Data.GraphViz                     as GV
 import qualified Data.GraphViz.Attributes.Complete as GV
 import qualified Data.GraphViz.Types.Generalised   as GVM
 import qualified Data.GraphViz.Types.Monadic       as GVM
-import           Data.Typeable                     (Typeable)
 import           Formatting
 import           Numeric                           (readHex)
 import           RIO

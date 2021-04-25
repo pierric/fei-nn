@@ -28,7 +28,7 @@ class Optimizer (opt :: * -> *) where
     -- | make the optimizer
     makeOptimizer :: (DType dtype, LrScheduler sch, OptimizerCst opt dtype args, MonadIO m)
                   => OptimizerTag opt -> sch
-                  -> ArgsHMap (OptimizerSym opt) (NDArray dtype) args
+                  -> ArgsHMap (OptimizerSym opt) '(NDArray, dtype) args
                   -> m (opt dtype)
     -- | run the optimizer with the input & expected tensor
     optimize :: (DType dtype, MonadState (TaggedModuleState dtype t) m, MonadIO m)
@@ -44,13 +44,13 @@ type family OptimizerCst (opt :: * -> *) dt (args :: [*]) :: Constraint
 -- | SGD optimizer
 data SGD_Opt dtype where
     SGD_Opt :: (LrScheduler sch, OptimizerCst SGD_Opt dtype args)
-            => sch -> ArgsHMap (OptimizerSym SGD_Opt) (NDArray dtype) args
+            => sch -> ArgsHMap (OptimizerSym SGD_Opt) '(NDArray, dtype) args
             -> SGD_Opt dtype
 
 type instance OptimizerSym SGD_Opt = "_sgd_update"
 -- 1.0.0 type instance OptimizerCst SGD_Opt dt args = HasArgs (OptimizerSym SGD_Opt) args '["wd", "rescale_grad", "clip_gradient"]
 type instance OptimizerCst SGD_Opt dt args =
-    HasArgs (OptimizerSym SGD_Opt) (NDArray dt) args '["wd", "rescale_grad", "clip_gradient", "lazy_update"]
+    HasArgs (OptimizerSym SGD_Opt) '(NDArray, dt) args '["wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer SGD_Opt where
     data OptimizerTag SGD_Opt = SGD
@@ -67,14 +67,14 @@ instance Optimizer SGD_Opt where
 -- | SGD with momentum optimizer
 data SGD_Mom_Opt dtype where
     SGD_Mom_Opt :: (LrScheduler sch, OptimizerCst SGD_Mom_Opt dtype args)
-                => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) (NDArray dtype) args
+                => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) '(NDArray, dtype) args
                 -> (IORef (M.HashMap Text (NDArray dtype)))
                 -> SGD_Mom_Opt dtype
 
 type instance OptimizerSym SGD_Mom_Opt = "_sgd_mom_update"
 -- 1.0.0 type instance OptimizerCst SGD_Mom_Opt dt args = HasArgs (OptimizerSym SGD_Mom_Opt) args '["momentum", "wd", "rescale_grad", "clip_gradient"]
 type instance OptimizerCst SGD_Mom_Opt dt args =
-    HasArgs (OptimizerSym SGD_Mom_Opt) (NDArray dt) args '["momentum", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
+    HasArgs (OptimizerSym SGD_Mom_Opt) '(NDArray, dt) args '["momentum", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer SGD_Mom_Opt where
     data OptimizerTag SGD_Mom_Opt = SGD'Mom
@@ -110,14 +110,14 @@ instance Optimizer SGD_Mom_Opt where
 -- | ADAM optmizer
 data ADAM_Opt dtype where
     ADAM_Opt :: (LrScheduler sch, OptimizerCst ADAM_Opt dtype args)
-            => sch -> ArgsHMap (OptimizerSym ADAM_Opt) (NDArray dtype) args
+            => sch -> ArgsHMap (OptimizerSym ADAM_Opt) '(NDArray, dtype) args
             -> IORef (M.HashMap Text (NDArray dtype, NDArray dtype))
             -> ADAM_Opt dtype
 
 type instance OptimizerSym ADAM_Opt = "_adam_update"
 -- 1.0.0 type instance OptimizerCst ADAM_Opt dt args = HasArgs (OptimizerSym ADAM_Opt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient"]
 type instance OptimizerCst ADAM_Opt dt args =
-    HasArgs (OptimizerSym ADAM_Opt) (NDArray dt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
+    HasArgs (OptimizerSym ADAM_Opt) '(NDArray, dt) args '["beta1", "beta2", "epsilon", "wd", "rescale_grad", "clip_gradient", "lazy_update"]
 
 instance Optimizer ADAM_Opt where
     data OptimizerTag ADAM_Opt = ADAM
@@ -150,13 +150,13 @@ instance Optimizer ADAM_Opt where
 
 data ADAMW_Opt dtype where
     ADAMW_Opt :: (LrScheduler sch, OptimizerCst ADAMW_Opt dtype args)
-              => sch -> ArgsHMap (OptimizerSym ADAMW_Opt) (NDArray dtype) args
+              => sch -> ArgsHMap (OptimizerSym ADAMW_Opt) '(NDArray, dtype) args
               -> IORef (M.HashMap Text (NDArray dtype, NDArray dtype))
               -> ADAMW_Opt dtype
 
 type instance OptimizerSym ADAMW_Opt = "__adamw_update"
 type instance OptimizerCst ADAMW_Opt dt args =
-    HasArgs (OptimizerSym ADAMW_Opt) (NDArray dt) args
+    HasArgs (OptimizerSym ADAMW_Opt) '(NDArray, dt) args
             '["beta1", "beta2", "epsilon", "wd", "eta", "clip_gradient", "rescale_grad"]
 
 instance Optimizer ADAMW_Opt where
