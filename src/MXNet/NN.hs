@@ -140,7 +140,12 @@ neptLog key value = do
 
 #endif
 
-initSession :: forall n t m x. (HasCallStack, FloatDType t, Feiable m, MonadIO m, MonadReader (FeiApp t n x) m)
+initSession :: forall n t m x. (HasCallStack,
+                                FloatDType t,
+                                InEnum (DTypeName t) BasicFloatDTypes,
+                                Feiable m,
+                                MonadIO m,
+                                MonadReader (FeiApp t n x) m)
             => Symbol t -> Config t -> m ()
 initSession sym cfg = do
     sess_ref <- view $ fa_session

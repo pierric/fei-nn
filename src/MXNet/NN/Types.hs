@@ -1,7 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE ExplicitForAll      #-}
-{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE AllowAmbiguousTypes   #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE ExplicitForAll        #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TemplateHaskell       #-}
 module MXNet.NN.Types where
 
 import           Control.Lens         (makeLenses)
@@ -25,17 +26,20 @@ import           MXNet.NN.TaggedState (Tagged)
 data Config a = Config
     { _cfg_data                :: HashMap Text Shape
     , _cfg_label               :: [Text]
-    , _cfg_initializers        :: HashMap Text (Initializer a)
-    , _cfg_default_initializer :: Initializer a
+    , _cfg_initializers        :: HashMap Text (SomeInitializer a)
+    , _cfg_default_initializer :: SomeInitializer a
     , _cfg_fixed_params        :: HashSet Text
     , _cfg_context             :: Context
     }
 
--- | Initializer is about how to create a NDArray from the symbol name and the given shape.
+-- | Initializer is to assign a NDArray some value.
 --
 -- Usually, it can be a wrapper of MXNet operators, such as @random_uniform@, @random_normal@,
 -- @random_gamma@, etc..
-type Initializer a = Text -> NDArray a -> IO ()
+class DType a => Initializer n a where
+    initNDArray :: n a -> Text -> NDArray a -> IO ()
+
+data SomeInitializer a = forall n . Initializer n a => SomeInitializer (n a)
 
 -- | Possible exception in 'TrainM'
 data Exc = MismatchedShapeOfSym Text [Int] [Int]

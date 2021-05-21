@@ -1,20 +1,19 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module MXNet.NN.Module where
 
-import           Control.Lens            (has, ix, use, (%=), (+=), (.=), (^?!))
+import           Control.Lens            (ix, use, (%=), (+=), (.=), (^?!))
 import           Formatting              (int, sformat, stext, (%))
 import           GHC.TypeLits            (KnownSymbol)
 import           RIO
 import qualified RIO.HashMap             as M
 import qualified RIO.HashSet             as S
-import           RIO.List                (zip3, zipWith3)
-import qualified RIO.NonEmpty            as NE
+import           RIO.List                (zipWith3)
 import qualified RIO.Text                as T
-import qualified RIO.Vector.Storable     as VS
 
 import           MXNet.Base
 import           MXNet.NN.DataIter.Class (Dataset (..), DatasetProp (..))
 import           MXNet.NN.EvalMetric     (EvalMetricMethod (..), MetricData)
-import qualified MXNet.NN.Initializer    as I
+import           MXNet.NN.Initializer
 import           MXNet.NN.Optimizer      (Optimizer, optimize)
 import           MXNet.NN.Session        (withSession)
 import           MXNet.NN.TaggedState    (Tagged (..), untag)
@@ -30,7 +29,13 @@ data InitError = UnknownShape Text
 instance Exception InitError
 
 
-initialize :: forall tag dty. (HasCallStack, FloatDType dty) => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
+-- | initialiez the module
+--
+-- Due to restriction of the random operations of mxnet, we have to restrict the
+-- dtype to BasicFloatDTypes.
+--
+initialize :: forall tag dty. (HasCallStack, FloatDType dty, InEnum (DTypeName dty) BasicFloatDTypes)
+           => Symbol dty -> Config dty -> IO (TaggedModuleState dty tag)
 initialize symbol config = do
     attrs    <- listAttrs symbol
     argnames <- listArguments symbol
@@ -50,8 +55,9 @@ initialize symbol config = do
 
     (params, executor) <- simpleBind symbol cxt rtypes shapes dtypes stypes
 
-    M.traverseWithKey (initN params) node_with_init
-    M.traverseWithKey (initD dinit initializers) params
+    let inits1 = concat $ M.mapWithKey (initN params) node_with_init
+        inits2 = concat $ M.mapWithKey (initD dinit initializers) params
+    forM_ (inits1 ++ inits2) (\(SomeInitializer n, t, a) -> initNDArray n t a)
 
     return $ Tagged $ ModuleState {
         _mod_symbol       = symbol,
@@ -71,35 +77,36 @@ initialize symbol config = do
     -- initialize input symbols.
     -- placeholders are backed by empty NDArray,
     -- other input symbols are initialized by an initializer.
-
-    initD dinit cinit name param = do
-        let init_op = case M.lookup name cinit of
-                        Just x  -> x
-                        Nothing -> dinit
-
-        case param of
-          ParameterG a g -> init_op name a >> I.zeros name g
-          ParameterA a   -> dinit name a
-          _              -> return ()
+    -- initD :: DType a
+    --       => SomeInitializer a
+    --       -> HashMap Text (SomeInitializer a)
+    --       -> Text
+    --       -> Parameter a
+    --       -> [(SomeInitializer a, Text, NDArray a)]
+    initD dinit _ name (ParameterA a)       = [(dinit, name, a)]
+    initD dinit cinit name (ParameterG a g) = let uinit = case M.lookup name cinit of
+                                                            Just uinit -> uinit
+                                                            Nothing    -> dinit
+                                               in [(uinit, name, a), (SomeInitializer InitZeros, name, g)]
+    initD _ _ _ _ = []
 
     -- initialize symbol with __init__ attribute
-    initN :: DType a => HashMap Text (Parameter a) -> Text -> Text -> IO ()
-    initN params name init_value = do
-        let do_init a = case T.unpack init_value of
-                          "[\"zero\", {}]" -> I.zeros name a
-                          "[\"one\", {}]"  -> I.ones name a
-                          v -> case readMaybe v :: Maybe Float of
-                                 Just v  -> I.constant v name a
-                                 _ -> case readMaybe v of
-                                        Just v  -> I.vector (VS.fromList v) name a
-                                        Nothing -> throwM $ BadInitValue name init_value
-         in case M.lookup name params of
-              Nothing -> let msg = sformat ("'" % stext % "' is not in param list, but has __init__ defined?") name
-                          in error $ T.unpack msg
-              Just (ParameterV a) -> do_init a
-              Just (ParameterA a) -> do_init a
-              _ ->  error $ T.unpack name ++ " has an __init__ property, " ++
-                            "but it is neither a variable nor an auxiliary state."
+    -- initN :: forall a . (FloatDType a, InEnum (DTypeName a) BasicFloatDTypes)
+    --       => HashMap Text (Parameter a) -> Text -> Text -> [(SomeInitializer a, Text, NDArray a)]
+    initN params name init_value =
+        -- NOTE: it seems not possible to create an arbitrary initializer from a str, even knowing that
+        -- it derives the Read class. We fall back to the predefined two options, SimpleInit or RandomInit.
+        let initS = SomeInitializer <$> (readMaybe $ T.unpack init_value :: Maybe (SimpleInit dty))
+            initR = SomeInitializer <$> (readMaybe $ T.unpack init_value :: Maybe (RandomInit dty))
+            param = M.lookup name params
+         in case (initS <|> initR, param) of
+              (_, Nothing) -> let msg = sformat ("'" % stext % "' is not in param list, but has __init__ defined?") name
+                               in error $ T.unpack msg
+              (Nothing, _) -> let msg = sformat ("'" % stext % "' has an __init__ property, but it is neither a variable nor an auxiliary state.") name
+                               in error $ T.unpack msg
+              (Just init, Just (ParameterV a)) -> [(init, name, a)]
+              (Just init, Just (ParameterA a)) -> [(init, name, a)]
+              (_, _) -> error "Shouldn't happen"
 
     parseShape :: Text -> Maybe [Int]
     parseShape = readMaybe . T.unpack
@@ -156,8 +163,8 @@ simpleBind symbol context rtypes shapes dtypes stypes = do
     auxnames <- listAuxiliaryStates symbol
     (args, grads, auxs, exec) <- execSimpleBind symbol context rtypes shapes dtypes stypes
 
-    let build1 n a Nothing  = traceShow ("V", n) (n, ParameterV a)
-        build1 n a (Just g) = traceShow ("G", n) (n, ParameterG a g)
+    let build1 n a Nothing  = (n, ParameterV a)
+        build1 n a (Just g) = (n, ParameterG a g)
         param1 = zipWith3 build1 argnames args grads
         param2 = zipWith (\n a -> (n, ParameterA a)) auxnames auxs
     return $ (M.fromList $ param1 ++ param2, exec)
@@ -167,7 +174,6 @@ adapt inputs = do
     symbol  <- use $ untag . mod_symbol
     exec    <- use $ untag . mod_executor
     context <- use $ untag . mod_context
-    fixed   <- use $ untag . mod_fixed_args
     shapes  <- use $ untag . mod_input_shapes
     shapes' <- liftIO $ mapM ndshape inputs
 
