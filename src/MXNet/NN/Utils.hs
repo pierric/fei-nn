@@ -90,7 +90,7 @@ loadState weights_filename ignores = do
             (_, Nothing, Just name', Just (ParameterG _ target)) -> do
                 checkShape name' (NDArray hdl) target
                 liftIO $ void $ copy (NDArray hdl) target
-            (_, Nothing, Just name', Just _) -> do
+            (_, Nothing, Just _, Just _) -> do
                 -- we silently ignore any missing grad,
                 -- for it is too common if we load the model for inference
                 return ()
@@ -105,6 +105,8 @@ loadState weights_filename ignores = do
             (_, Just (ParameterA target), _, _)   -> do
                 checkShape name (NDArray hdl) target
                 liftIO $ void $ copy (NDArray hdl) target
+            (_, _, Nothing, Just _) -> do
+                error "This won't happen"
     where
         checkShape :: (MonadReader env m, HasLogFunc env, MonadIO m, DType a)
                    => Text -> NDArray a -> NDArray a -> m ()
