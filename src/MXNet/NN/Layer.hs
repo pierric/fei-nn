@@ -14,10 +14,13 @@ import           RIO
 import qualified RIO.NonEmpty                as NE
 import qualified RIO.State                   as ST
 import qualified RIO.Text                    as RT
+import qualified RIO.Vector.Storable         as VS
 import           System.IO.Unsafe            (unsafePerformIO)
 
 import           MXNet.Base
 import qualified MXNet.Base.Operators.Tensor as S
+import           MXNet.NN.Initializer        (SimpleInit (..))
+import           MXNet.NN.Types              (Initializer)
 
 runLayerBuilder :: MonadIO m => Layer a -> m a
 runLayerBuilder = liftIO . flip ST.evalStateT []
@@ -36,7 +39,8 @@ type Layer = ST.StateT [(Maybe Text, SomeNameBuilder)] IO
 class Show nb => NameBuilder nb where
     nextName :: MonadIO m => nb -> m Text
 
-data SomeNameBuilder = forall nb . (NameBuilder nb) => SomeNameBuilder nb
+data SomeNameBuilder where
+  SomeNameBuilder :: forall nb. (NameBuilder nb) => nb -> SomeNameBuilder
 
 instance Show SomeNameBuilder where
     show (SomeNameBuilder nb) = show nb
@@ -170,24 +174,31 @@ parameter name grad_req mshape = do
                   ReqAdd     -> "add"
                   ReqInplace -> "inplace"
 
+initWith :: (Initializer n a, Show (n a))
+         => n a -> Symbol a -> Layer (Symbol a)
+initWith init sym = liftIO $ do
+    setAttr sym "__init__" (tshow init)
+    return sym
+
+
 variable :: (DType a, KnownSymbol (DTypeName a))
           => Text -> Layer (Symbol a)
 variable name = parameter name ReqNull Nothing
 
 
 constant :: forall a. (DType a, KnownSymbol (DTypeName a))
-         => NonEmpty Int -> [Float] -> Layer (Symbol a)
+         => NonEmpty Int -> [a] -> Layer (Symbol a)
 constant shape value = do
     name <- getNextNamePrefixed
     sym  <- liftIO $ do
                 var <- mxSymbolCreateVariable name
                 let dtype = RT.pack $ symbolVal $ (Proxy :: Proxy (DTypeName a))
                 setAttr var "__shape__" (tshow $ NE.toList shape)
-                setAttr var "__init__"  (tshow value)
                 setAttr var "__dtype__" dtype
                 setAttr var "__storage_type__" "default"
                 setAttr var "__grad_req__" "null"
                 return $ Symbol var
+    sym <- initWith (InitWithVec $ VS.fromList value) sym
     named (RT.concat [name, ".sg"]) $ blockGrad sym
 
 convolution :: (HasArgs "_Convolution" '(Symbol, a) args
