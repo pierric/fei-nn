@@ -68,7 +68,7 @@ instance Optimizer SGD_Opt where
 data SGD_Mom_Opt dtype where
     SGD_Mom_Opt :: (LrScheduler sch, OptimizerCst SGD_Mom_Opt dtype args)
                 => sch -> ArgsHMap (OptimizerSym SGD_Mom_Opt) '(NDArray, dtype) args
-                -> (IORef (M.HashMap Text (NDArray dtype)))
+                -> IORef (M.HashMap Text (NDArray dtype))
                 -> SGD_Mom_Opt dtype
 
 type instance OptimizerSym SGD_Mom_Opt = "_sgd_mom_update"

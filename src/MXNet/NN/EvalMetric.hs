@@ -9,18 +9,18 @@
 module MXNet.NN.EvalMetric where
 
 import           Control.Lens
-import           Data.Constraint
-import           Formatting                  (fixed, int, sformat, stext, (%))
-import           RIO                         hiding (view)
-import qualified RIO.HashMap                 as M
-import           RIO.List                    (headMaybe)
-import           RIO.State                   (execState)
-import qualified RIO.Text                    as T
-import qualified RIO.Vector.Storable         as SV
-import qualified RIO.Vector.Storable.Partial as SV (head)
+import           Formatting                   (fixed, int, sformat, stext, (%))
+import           RIO                          hiding (view)
+import qualified RIO.HashMap                  as M
+import           RIO.List                     (headMaybe)
+import           RIO.State                    (execState)
+import qualified RIO.Text                     as T
+import qualified RIO.Vector.Storable          as SV
+import qualified RIO.Vector.Storable.Partial  as SV (head)
 
 import           MXNet.Base
-import           MXNet.Base.Operators.Tensor (_norm)
+import           MXNet.Base.Operators.Tensor  (_norm)
+import           MXNet.Base.Tensor.Functional
 
 -- | Keep a double value and its running mean
 data RunningValue = RunningValue
