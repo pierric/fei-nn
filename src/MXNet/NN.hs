@@ -13,6 +13,7 @@ module MXNet.NN (
     module MXNet.NN.Layer,
     module MXNet.NN.Types,
     module MXNet.NN.Utils,
+    module MXNet.NN.Initializer,
 #if USE_REPA
     module MXNet.NN.Utils.Repa,
 #endif
@@ -24,11 +25,14 @@ module MXNet.NN (
     FeiApp,
     Feiable(..),
     FeiMType(..),
+    SimpleFeiM(..),
+    runFeiMX,
     fa_log_func,
     fa_process_context,
     fa_session,
     fa_extra,
 #ifdef NEPTUNE
+    NeptFeiM(..),
     NeptExtra,
     neptLog,
 #endif
@@ -44,6 +48,7 @@ import           MXNet.Base
 import           MXNet.NN.Callback
 import           MXNet.NN.DataIter.Class
 import           MXNet.NN.EvalMetric
+import           MXNet.NN.Initializer
 import           MXNet.NN.Layer
 import           MXNet.NN.LrScheduler
 import           MXNet.NN.Module
@@ -77,8 +82,8 @@ instance HasLogFunc (FeiApp t n x) where
 instance HasSessionRef (FeiApp t n x) (TaggedModuleState t n) where
     sessionRefL = fa_session
 
-newtype SimpleFeiM t n a = SimpleFeiM (ReaderT (FeiApp t n ()) (ResourceT IO) a)
-    deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
+newtype SimpleFeiM t n a = SimpleFeiM {unSimpleFeiM :: ReaderT (FeiApp t n ()) (ResourceT IO) a}
+    deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadThrow, MonadResource)
 
 deriving instance MonadReader (FeiApp t n ()) (SimpleFeiM t n)
 instance MonadUnliftIO (SimpleFeiM t n) where
@@ -87,8 +92,8 @@ instance MonadUnliftIO (SimpleFeiM t n) where
                                 \case SimpleFeiM m -> run m
 
 
-runFeiMX :: x -> ReaderT (FeiApp t n x) (ResourceT IO) a -> IO a
-runFeiMX x body = do
+runFeiMX :: x -> Bool -> ReaderT (FeiApp t n x) (ResourceT IO) a -> IO a
+runFeiMX x notify_shutdown body = do
     -- call mxListAllOpNames can ensure the MXNet itself is properly initialized
     -- i.e. MXNet operators are registered in the NNVM
     void mxListAllOpNames
@@ -97,9 +102,9 @@ runFeiMX x body = do
     pcontx  <- mkDefaultProcessContext
     session <- newEmptyMVar
     runResourceT $ do
-        _ <- register mxNotifyShutdown
+        when notify_shutdown $ void $ register mxNotifyShutdown
         withLogFunc logopt $ \logfunc ->
-            flip runReaderT (FeiApp logfunc pcontx session x) body
+            runReaderT body (FeiApp logfunc pcontx session x)
 
 class Feiable (m :: * -> *) where
     data FeiMType m a :: *
@@ -111,14 +116,14 @@ instance Exception SessionAlreadyExist
 
 instance Feiable (SimpleFeiM t n) where
     data FeiMType (SimpleFeiM t n) a = Simple (SimpleFeiM t n a)
-    runFeiM (Simple (SimpleFeiM body)) = runFeiMX () body
+    runFeiM (Simple (SimpleFeiM body)) = runFeiMX () True body
 
 #ifdef NEPTUNE
 
 type NeptExtra = (NeptuneSession, Experiment, Text -> Double -> IO ())
 
-newtype NeptFeiM t n a = NeptFeiM (ReaderT (FeiApp t n NeptExtra) (ResourceT IO) a)
-    deriving (Functor, Applicative, Monad, MonadIO, MonadFail)
+newtype NeptFeiM t n a = NeptFeiM {unNeptFeiM :: ReaderT (FeiApp t n NeptExtra) (ResourceT IO) a}
+    deriving (Functor, Applicative, Monad, MonadIO, MonadFail, MonadThrow, MonadResource)
 
 deriving instance MonadReader (FeiApp t n NeptExtra) (NeptFeiM t n)
 instance MonadUnliftIO (NeptFeiM t n) where
@@ -131,7 +136,7 @@ instance Feiable (NeptFeiM t n) where
     runFeiM (WithNept project (NeptFeiM body)) = do
         withNept project $ \ nsess nexpt ->
             let logger k v = nlog nexpt k (fromRational (toRational v) :: Double)
-             in runFeiMX (nsess, nexpt, logger) body
+             in runFeiMX (nsess, nexpt, logger) True body
 
 neptLog :: Text -> Double -> NeptFeiM t n ()
 neptLog key value = do

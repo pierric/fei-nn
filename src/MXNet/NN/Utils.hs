@@ -2,23 +2,25 @@
 {-# LANGUAGE RecordWildCards       #-}
 module MXNet.NN.Utils where
 
-import           Control.Lens         (use)
+import           Control.Lens                 (use)
 import           Formatting
 import           RIO
-import           RIO.Directory        (getModificationTime, listDirectory)
-import           RIO.FilePath         (dropExtension, (</>))
-import qualified RIO.HashMap          as M
-import           RIO.List             (intersperse, lastMaybe, sortOn)
-import qualified RIO.Text             as T
+import           RIO.Directory                (getModificationTime,
+                                               listDirectory)
+import           RIO.FilePath                 (dropExtension, (</>))
+import qualified RIO.HashMap                  as M
+import           RIO.List                     (intersperse, lastMaybe, sortOn)
+import qualified RIO.Text                     as T
 
-import           MXNet.Base           (Context (..), DType, NDArray (..),
-                                       Symbol (..), ndshape)
-import           MXNet.Base.Raw       (mxNDArrayLoad, mxNDArraySave,
-                                       mxSymbolSaveToFile)
-import           MXNet.Base.Tensor    (copy)
-import           MXNet.NN.TaggedState (untag)
-import           MXNet.NN.Types       (Module, Parameter (..), mod_params,
-                                       mod_symbol)
+import           MXNet.Base                   (Context (..), DType,
+                                               NDArray (..), Symbol (..),
+                                               ndshape)
+import           MXNet.Base.Raw               (mxNDArrayLoad, mxNDArraySave,
+                                               mxSymbolSaveToFile)
+import           MXNet.Base.Tensor.Functional (copy)
+import           MXNet.NN.TaggedState         (untag)
+import           MXNet.NN.Types               (Module, Parameter (..),
+                                               mod_params, mod_symbol)
 
 -- | format a shape
 formatShape :: [Int] -> Text

@@ -119,3 +119,18 @@ Library
         cpp-options:        -DNEPTUNE
         build-depends:      neptune-backend < 1
     }
+
+test-suite tests
+  type:                     exitcode-stdio-1.0
+  hs-source-dirs:           test
+  main-is:                  TestMain.hs
+  other-modules:            TestModule
+  build-depends:            rio
+                          , base
+                          , lens
+                          , tasty
+                          , tasty-hunit
+                          , tasty-discover
+                          , fei-base >= 2.0.0
+                          , fei-nn >= 2.0.0
+  default-language:         Haskell2010

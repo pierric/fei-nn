@@ -20,6 +20,10 @@ extra-deps:
   commit: 792ec73bc3b0e8d4aa2683af6b2a3fc03b5f8d95
 - streaming-utils-0.1.4.7
 - graphviz-2999.20.0.4
+- type-sets-0.1.1.0
+- cmptype-0.2.0.0
+- magic-tyfams-0.1.1.0
+- c2hs-0.28.8
 extra-include-dirs:
 - /home/jiasen/workspace/mxnet/build-1.8.0/include
 extra-lib-dirs:

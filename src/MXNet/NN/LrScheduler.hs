@@ -1,12 +1,11 @@
 {-# LANGUAGE DataKinds        #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeOperators    #-}
 module MXNet.NN.LrScheduler where
 
 import           MXNet.Base.Spec.Operator
 import           RIO                      hiding (Const)
 
-class LrScheduler sch where
+class Show sch => LrScheduler sch where
     baseLR :: sch -> Float
     getLR  :: sch -> Int -> Float
 
@@ -14,7 +13,8 @@ instance LrScheduler Float where
     baseLR = id
     getLR = const
 
-data Const = Const Float
+newtype Const = Const Float
+    deriving Show
 instance LrScheduler Const where
     baseLR (Const lr) = lr
     getLR  (Const lr) = const lr
@@ -23,6 +23,7 @@ lrOfConst :: Float -> Const
 lrOfConst = Const
 
 data FactorScheduler = Factor Float Float Int Float
+    deriving Show
 instance LrScheduler FactorScheduler where
     baseLR (Factor base _ _ _) = base
     getLR  (Factor base factor step stop) nup =
@@ -43,6 +44,7 @@ lrOfFactor args = Factor base factor step stop
     stop   = fromMaybe 1e-8 (args !? #stop)
 
 data MultifactorScheduler = Multifactor Float Float [Int]
+    deriving Show
 instance LrScheduler MultifactorScheduler where
     baseLR (Multifactor base _ _) = base
     getLR  (Multifactor base factor steps) nup = base * factor ^ (index nup steps)
@@ -63,6 +65,7 @@ lrOfMultifactor args = Multifactor base factor steps
     base = fromMaybe 0.01 (args !? #base)
 
 data PolyScheduler = Poly Float Float Int
+    deriving Show
 instance LrScheduler PolyScheduler where
     baseLR (Poly base _ _) = base
     getLR  (Poly base power maxnup) nup =
@@ -82,6 +85,7 @@ lrOfPoly args = Poly base power maxnup
     power  = fromMaybe 2    (args !? #power)
 
 data WarmupScheduler a = WarmupScheduler Int a
+    deriving Show
 instance LrScheduler a => LrScheduler (WarmupScheduler a) where
     baseLR (WarmupScheduler _ sch) = baseLR sch
     getLR  (WarmupScheduler warmup_steps sch) nup =

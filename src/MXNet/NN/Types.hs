@@ -86,6 +86,14 @@ data Statistics = Statistics
     , _stat_last_lr :: !Float
     }
 
+hasGradient :: Parameter a -> Bool
+hasGradient (ParameterG _ _) = True
+hasGradient _                = False
+
+isAuxiliary :: Parameter a -> Bool
+isAuxiliary (ParameterA _) = True
+isAuxiliary _              = False
+
 makeLenses ''Statistics
 makeLenses ''ModuleState
 makeLenses ''Config
