@@ -1,22 +1,24 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module MXNet.NN.Module where
 
-import           Control.Lens            (ix, use, (%=), (+=), (.=), (^?!))
-import           Formatting              (int, sformat, stext, (%))
-import           GHC.TypeLits            (KnownSymbol)
+import           Control.Lens                 (ix, use, (%=), (+=), (.=), (^?!))
+import           Formatting                   (int, sformat, stext, (%))
+import           GHC.TypeLits                 (KnownSymbol)
 import           RIO
-import qualified RIO.HashMap             as M
-import qualified RIO.HashSet             as S
-import           RIO.List                (zipWith3)
-import qualified RIO.Text                as T
+import qualified RIO.HashMap                  as M
+import qualified RIO.HashSet                  as S
+import           RIO.List                     (zipWith3)
+import qualified RIO.Text                     as T
 
 import           MXNet.Base
-import           MXNet.NN.DataIter.Class (Dataset (..), DatasetProp (..))
-import           MXNet.NN.EvalMetric     (EvalMetricMethod (..), MetricData)
+import           MXNet.Base.Tensor.Functional (copy)
+import           MXNet.NN.DataIter.Class      (Dataset (..), DatasetProp (..))
+import           MXNet.NN.EvalMetric          (EvalMetricMethod (..),
+                                               MetricData)
 import           MXNet.NN.Initializer
-import           MXNet.NN.Optimizer      (Optimizer, optimize)
-import           MXNet.NN.Session        (withSession)
-import           MXNet.NN.TaggedState    (Tagged (..), untag)
+import           MXNet.NN.Optimizer           (Optimizer, optimize)
+import           MXNet.NN.Session             (withSession)
+import           MXNet.NN.TaggedState         (Tagged (..), untag)
 import           MXNet.NN.Types
 
 
@@ -44,8 +46,8 @@ initialize symbol config = do
         cxt   = config ^. cfg_context
         node_with_init = M.mapMaybe (M.lookup "__init__") attrs
         no_grad = (config ^. cfg_fixed_params) `S.union`
-                  (S.fromList $ M.keys input_shapes ++ label_names)
-        fixed   = no_grad `S.difference` (S.fromList $ M.keys input_shapes ++ label_names)
+                  S.fromList (M.keys input_shapes ++ label_names)
+        fixed   = no_grad `S.difference` S.fromList (M.keys input_shapes ++ label_names)
         rtypes = M.mapMaybe (M.lookup "__grad_req__" >=> parseRType) attrs `M.union`
                  M.map (const ReqNull) (S.toMap no_grad) `M.union`
                  M.fromList [(n, ReqWrite) | n <- argnames]
@@ -53,7 +55,7 @@ initialize symbol config = do
         dtypes = M.mapMaybe (M.lookup "__dtype__" >=> parseDType) attrs
         stypes = M.mapMaybe (M.lookup "__storage_type__" >=> parseSType) attrs
 
-    (params, executor) <- simpleBind symbol cxt rtypes shapes dtypes stypes
+    (params, executor) <- simpleBind symbol cxt rtypes shapes dtypes stypes [] Nothing
 
     let inits1 = concat $ M.mapWithKey (initN params) node_with_init
         inits2 = concat $ M.mapWithKey (initD dinit initializers) params
@@ -108,28 +110,6 @@ initialize symbol config = do
               (Just init, Just (ParameterA a)) -> [(init, name, a)]
               (_, _) -> error "Shouldn't happen"
 
-    parseShape :: Text -> Maybe [Int]
-    parseShape = readMaybe . T.unpack
-
-    parseRType :: Text -> Maybe ReqType
-    parseRType "null"    = Just ReqNull
-    parseRType "write"   = Just ReqWrite
-    parseRType "add"     = Just ReqAdd
-    parseRType "inplace" = Just ReqInplace
-    parseRType _         = Nothing
-
-    parseDType :: Text -> Maybe Int
-    parseDType "float32" = Just 0
-    parseDType "float64" = Just 1
-    parseDType "uint8"   = Just 3
-    parseDType "int32"   = Just 4
-    parseDType "int64"   = Just 6
-    parseDType _         = Nothing
-
-    parseSType :: Text -> Maybe Int
-    parseSType "default" = Just 0
-    parseSType _         = Nothing
-
 bind :: (HasCallStack, FloatDType dty)
      => Symbol dty -> Context -> M.HashMap Text (Parameter dty) -> Bool -> IO (Executor dty)
 bind symbol context params trainable = do
@@ -157,11 +137,15 @@ simpleBind :: (HasCallStack, FloatDType dty)
            -> HashMap Text Shape
            -> HashMap Text Int
            -> HashMap Text Int
+           -> [Text]
+           -> Maybe (Executor dty)
            -> IO (M.HashMap Text (Parameter dty), Executor dty)
-simpleBind symbol context rtypes shapes dtypes stypes = do
+simpleBind symbol context rtypes shapes dtypes stypes shared_arg_names shared_exec = do
     argnames <- listArguments symbol
     auxnames <- listAuxiliaryStates symbol
-    (args, grads, auxs, exec) <- execSimpleBind symbol context rtypes shapes dtypes stypes
+    (args, grads, auxs, exec) <- execSimpleBindWithShared
+                                    symbol context rtypes shapes dtypes stypes
+                                    shared_arg_names shared_exec
 
     let build1 n a Nothing  = (n, ParameterV a)
         build1 n a (Just g) = (n, ParameterG a g)
@@ -214,6 +198,41 @@ forwardOnly inputs = do
     liftIO $ do
         execForward exec False
         execGetOutputs exec
+
+withSharedParameters :: (HasCallStack, FloatDType dty, MonadIO m, MonadThrow m)
+                    => Symbol dty
+                    -> HashMap Text [Int]
+                    -> ((HashMap Text (NDArray dty) -> IO [NDArray dty]) -> IO a)
+                    -> Module tag dty m a
+withSharedParameters symbol input_shapes proc = do
+    attrs <- liftIO $ listAttrs symbol
+
+    params <- use (untag . mod_params) <&> M.filter hasGradient
+    cxt    <- use (untag . mod_context)
+    exec   <- use $ untag . mod_executor
+
+    let shared_arg_names = S.toList $ S.intersection (mapToSet params) (mapToSet attrs)
+        shapes = M.mapMaybe (M.lookup "__shape__" >=> parseShape) attrs `M.union` input_shapes
+        rtypes = M.map (const ReqNull) attrs
+        dtypes = M.mapMaybe (M.lookup "__dtype__" >=> parseDType) attrs
+        stypes = M.mapMaybe (M.lookup "__storage_type__" >=> parseSType) attrs
+
+    liftIO $ do
+        (params', executor) <- simpleBind symbol cxt rtypes shapes dtypes stypes
+                                          shared_arg_names (Just exec)
+
+        let forward inputs = do
+                forM_ (M.toList inputs) $ \ (k, src) -> do
+                    case M.lookup k params' of
+                      Just (ParameterV dst) -> void $ copy src dst
+                      _                     -> return ()
+
+                execForward executor False
+                execGetOutputs executor
+        proc forward
+
+    where
+        mapToSet = S.fromMap . M.map (const ())
 
 fit :: (HasCallStack, FloatDType dty, MonadIO m) => M.HashMap Text (NDArray dty) -> Module tag dty m ()
 fit inputs = do
@@ -293,3 +312,26 @@ fitDataset sess trainDataset valDataset make_binding opt metric epochs = do
         logInfo $ display eval
         --
         -- forM_ callbacks (endOfVal epochInd total)
+        --
+
+parseShape :: Text -> Maybe [Int]
+parseShape = readMaybe . T.unpack
+
+parseRType :: Text -> Maybe ReqType
+parseRType "null"    = Just ReqNull
+parseRType "write"   = Just ReqWrite
+parseRType "add"     = Just ReqAdd
+parseRType "inplace" = Just ReqInplace
+parseRType _         = Nothing
+
+parseDType :: Text -> Maybe Int
+parseDType "float32" = Just 0
+parseDType "float64" = Just 1
+parseDType "uint8"   = Just 3
+parseDType "int32"   = Just 4
+parseDType "int64"   = Just 6
+parseDType _         = Nothing
+
+parseSType :: Text -> Maybe Int
+parseSType "default" = Just 0
+parseSType _         = Nothing

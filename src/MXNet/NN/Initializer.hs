@@ -20,13 +20,13 @@ data SimpleInit a = InitEmpty | InitZeros | InitOnes | InitWithVal Float | InitW
 
 instance DType a => Initializer SimpleInit a where
     initNDArray InitEmpty _ _              = return ()
-    initNDArray InitZeros name arr         = constant 0 name arr
-    initNDArray InitOnes  name arr         = constant 1 name arr
-    initNDArray (InitWithVal val) name arr = constant val name arr
+    initNDArray InitZeros name arr         = _constant 0 name arr
+    initNDArray InitOnes  name arr         = _constant 1 name arr
+    initNDArray (InitWithVal val) name arr = _constant val name arr
     initNDArray (InitWithVec val) _ arr    = copyFromVector arr val
 
-constant :: forall a. DType a => Float -> Text -> NDArray a -> IO ()
-constant val _ arr = upd @a $ T.__set_value (#src := val .& Nil) (Just [arr])
+_constant :: forall a. DType a => Float -> Text -> NDArray a -> IO ()
+_constant val _ arr = upd @a $ T.__set_value (#src := val .& Nil) (Just [arr])
 
 data RandomInit a = InitUniform Float
                   | InitNormal  Float
